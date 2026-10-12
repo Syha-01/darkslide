@@ -922,7 +922,11 @@ impl App {
                 self.pending_actions.push(Action::AutoTone);
             }
         }
-        if cmd && pressed(Key::S) && self.doc().is_some() {
+        // Ctrl+Shift+S syncs settings to the selected photos, as in Lightroom
+        if cmd && shift && pressed(Key::S) && self.doc().is_some() {
+            self.copy_settings(None);
+            self.copy.open_for_paste();
+        } else if cmd && pressed(Key::S) && self.doc().is_some() {
             self.export.open = true;
         }
         if cmd && pressed(Key::C) && self.doc().is_some() {
@@ -992,10 +996,14 @@ impl App {
         if pressed(Key::Q) {
             self.ba = self.ba.next();
         }
-        if pressed(Key::P) && shift {
-            self.set_tool(Tool::Presets);
-        } else if pressed(Key::Backslash) || pressed(Key::P) {
+        if pressed(Key::P) {
+            self.set_tool(if tool == Tool::Presets { Tool::Edit } else { Tool::Presets });
+        }
+        if pressed(Key::Backslash) {
             self.show_before = !self.show_before;
+        }
+        if pressed(Key::Questionmark) || (shift && pressed(Key::Slash)) || pressed(Key::F1) {
+            self.show_shortcuts = !self.show_shortcuts;
         }
         if pressed(Key::I) {
             self.pick = if self.pick == Pick::WhiteBalance { Pick::None } else { Pick::WhiteBalance };
@@ -1319,7 +1327,7 @@ impl App {
                     self.copy.open_for_paste();
                     ui.close();
                 }
-                if menu_item(ui, has_doc, "Sync settings to selected…", "") {
+                if menu_item(ui, has_doc, "Sync settings to selected…", "Ctrl+Shift+S") {
                     self.copy_settings(None);
                     self.copy.open_for_paste();
                     ui.close();
@@ -1431,7 +1439,7 @@ impl App {
                 }
             });
             ui.menu_button("Help", |ui| {
-                if menu_item(ui, true, "Keyboard shortcuts", "") {
+                if menu_item(ui, true, "Keyboard shortcuts", "?") {
                     self.show_shortcuts = true;
                     ui.close();
                 }
@@ -1455,10 +1463,7 @@ impl App {
                 let icon = |ui: &mut egui::Ui, enabled: bool, glyph: &str, tip: &str| {
                     ui.add_enabled(enabled, egui::Button::new(RichText::new(glyph).size(15.0)).frame(false)).on_hover_text(tip).clicked()
                 };
-                if icon(ui, true, ic::QUESTION, "About Darkslide") {
-                    self.show_about = true;
-                }
-                if icon(ui, true, ic::KEYBOARD, "Keyboard shortcuts") {
+                if icon(ui, true, ic::QUESTION, "Keyboard shortcuts (?)") {
                     self.show_shortcuts = true;
                 }
                 if icon(ui, true, ic::GEAR_SIX, "Preferences…") {
@@ -1529,17 +1534,6 @@ impl App {
             );
             ui.add_space(8.0);
 
-            let (s_rect, s_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
-            if s_resp.hovered() {
-                ui.painter().rect_filled(s_rect, 4.0, crate::theme::pal().button);
-            }
-            let s_col = if s_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
-            ui.painter().text(s_rect.center(), egui::Align2::CENTER_CENTER, ic::GEAR_SIX, egui::FontId::proportional(19.0), s_col);
-            if s_resp.on_hover_text("Preferences…").clicked() {
-                self.show_prefs = true;
-            }
-
-            ui.add_space(4.0);
             let (f_rect, f_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
             if f_resp.hovered() {
                 ui.painter().rect_filled(f_rect, 4.0, crate::theme::pal().button);
@@ -1643,7 +1637,7 @@ impl App {
 
     /// ACR's workflow line: what "Save image" will produce with the current
     /// export settings, e.g. "Adobe RGB (1998) - 16 bit - 6016 x 4016 (24.2MP) - 300 ppi".
-    fn workflow_text(&self) -> Option<String> {
+    fn workflow_text(&self, short: bool) -> Option<String> {
         use darkslide_core::export::Format;
         let ex = self.export.settings.as_ref().unwrap_or(&self.prefs.export);
         let (cw, ch, _) = self.crop_dims_for_export()?;
@@ -1656,6 +1650,10 @@ impl App {
             _ => ex.bit_depth,
         };
         let mp = w as f64 * h as f64 / 1e6;
+        if short {
+            let space = ex.color_space.name().split([' ', '(']).next().unwrap_or("");
+            return Some(format!("{space} · {bits} bit · {mp:.1}MP"));
+        }
         Some(format!("{} - {bits} bit - {w} x {h} ({mp:.1}MP) - {} ppi", ex.color_space.name(), ex.ppi))
     }
 
@@ -1719,7 +1717,7 @@ impl App {
                 }
                 let single = self.ba == BeforeAfter::Off;
                 if ui
-                    .add_enabled_ui(single, |ui| toggle(ui, self.show_before, RichText::new("Before"), 58.0, "Show the photo before editing (\\ or P)"))
+                    .add_enabled_ui(single, |ui| toggle(ui, self.show_before, RichText::new("Before"), 58.0, "Show the photo before editing (\\)"))
                     .inner
                 {
                     self.show_before = !self.show_before;
@@ -1780,7 +1778,10 @@ impl App {
                     self.export.open = true;
                 }
                 ui.add_space(12.0);
-                if let Some(text) = self.workflow_text() {
+                // the long line only when there's room for it beside the buttons
+                let room = ui.available_width();
+                let text = if room > 360.0 { self.workflow_text(false) } else if room > 150.0 { self.workflow_text(true) } else { None };
+                if let Some(text) = text {
                     if ui
                         .link(RichText::new(text).size(11.5).underline().color(crate::theme::pal().link))
                         .on_hover_text("Output settings (Save image)")

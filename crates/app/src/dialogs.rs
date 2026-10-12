@@ -666,6 +666,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         "Files",
         &[
             ("Ctrl+O / Ctrl+Shift+O", "Open files / folder"),
+            ("Ctrl+Shift+S", "Sync settings to selected photos"),
             ("Ctrl+S", "Save image"),
             ("← / →", "Previous / next image"),
             ("0–5 / 6–9", "Rating / colour label"),
@@ -691,7 +692,8 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("E", "Edit"),
             ("C / B / M / S", "Crop, Remove, Masking, Snapshots (again for Edit)"),
-            ("Shift+P", "Presets"),
+            ("P", "Presets"),
+            ("? or F1", "This list"),
             ("Enter", "Apply crop"),
             ("Esc", "Cancel crop, deselect, or leave the tool"),
             ("Delete", "Delete selected spot, mask or red eye"),
@@ -703,12 +705,12 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     (
         "View",
         &[
-            ("Z, double-click", "Fit / 100%"),
+            ("Z, click the photo", "Fit / 100%"),
             ("Ctrl+0 / Ctrl+Alt+0", "Fit / 100%"),
             ("Ctrl+= / Ctrl+−, Ctrl+wheel, wheel", "Zoom"),
             ("Space-drag, middle-drag", "Pan"),
             ("Q", "Cycle before/after views"),
-            ("\\ or P", "Show before"),
+            ("\\", "Show before"),
             ("U / O", "Shadow / highlight clipping"),
             ("Ctrl+'", "Grid overlay"),
             ("F", "Full screen"),
@@ -1040,22 +1042,25 @@ pub fn show_dialogs(app: &mut App, ctx: &egui::Context) {
         let mut open = true;
         egui::Window::new("Keyboard shortcuts")
             .open(&mut open)
+            .default_width(880.0)
             .collapsible(false)
             .resizable(false)
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().max_height(ctx.content_rect().height() - 120.0).show(ui, |ui| {
-                    for (group, rows) in SHORTCUTS {
+                // two columns of groups, so the whole list fits without scrolling
+                ui.columns(2, |cols| {
+                    for (i, (group, rows)) in SHORTCUTS.iter().enumerate() {
+                        let ui = &mut cols[i % 2];
                         ui.label(RichText::new(*group).strong());
-                        egui::Grid::new(("sc", *group)).striped(true).min_col_width(230.0).show(ui, |ui| {
+                        egui::Grid::new(("sc", *group)).striped(true).num_columns(2).show(ui, |ui| {
                             for (k, v) in rows.iter() {
-                                ui.label(RichText::new(*k).monospace());
+                                ui.label(RichText::new(*k).monospace().size(11.5));
                                 ui.label(*v);
                                 ui.end_row();
                             }
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(10.0);
                     }
                 });
             });

@@ -425,6 +425,27 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     // ---------------------------------------------------------- overlays
     draw_overlays(app, &painter, &map, resp.hover_pos());
 
+    // navigator: where the zoomed view sits in the photo; click or drag it to pan
+    if let (Zoom::Scale(_), Some(t)) = (app.zoom, app.fit_tex.as_ref())
+        && !crop_tool
+        && app.ba == BeforeAfter::Off
+        && (img_rect.width() > view.width() || img_rect.height() > view.height())
+    {
+        let ratio = (cw / ch) as f32;
+        let size = if ratio >= 1.0 { vec2(170.0, 170.0 / ratio) } else { vec2(120.0 * ratio, 120.0) };
+        let nav = Rect::from_min_size(pos2(view.left() + 12.0, view.bottom() - 12.0 - size.y), size);
+        painter.rect_filled(nav.expand(3.0), 4.0, Color32::from_black_alpha(190));
+        painter.image(t.tex.id(), nav, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        let vis = view.intersect(img_rect);
+        let to_nav = |q: Pos2| pos2(nav.left() + (q.x - img_rect.left()) / img_rect.width() * nav.width(), nav.top() + (q.y - img_rect.top()) / img_rect.height() * nav.height());
+        let box_ = Rect::from_min_max(to_nav(vis.min), to_nav(vis.max));
+        painter.rect_stroke(box_, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+        let nr = ui.interact(nav, ui.id().with("navigator"), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Move);
+        if let Some(q) = nr.interact_pointer_pos().filter(|_| nr.dragged() || nr.clicked()) {
+            app.center = [((q.x - nav.left()) / nav.width()).clamp(0.0, 1.0), ((q.y - nav.top()) / nav.height()).clamp(0.0, 1.0)];
+        }
+    }
+
     // cursor hints: show what a press here would do
     if resp.hovered() || app.drag.active() {
         let at = resp.hover_pos().or(pointer).unwrap_or(app.drag.last);
