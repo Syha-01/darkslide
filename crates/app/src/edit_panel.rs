@@ -192,10 +192,42 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     };
     profile_block(ui);
 
-    // ------------------------------------------------------------- Basic
-    let mut basic_on = s.panels.basic;
-    section(ui, "Basic", Some(&mut basic_on), true, |ui| {
-        widgets::sub_header(ui, "WHITE BALANCE");
+    // ------------------------------------------------------------- Light
+    let mut light_on = s.panels.basic;
+    section(ui, "Light", Some(&mut light_on), true, |ui| {
+        let max_ev = if s.hdr.enabled { 10.0 } else { 5.0 };
+        slider(ui, &mut s.exposure, SliderSpec::new("Exposure", -max_ev, max_ev, 0.0).dec(2));
+        slider(ui, &mut s.contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.blacks, SliderSpec::new("Blacks", -100.0, 100.0, 0.0));
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.hdr.enabled, "HDR").on_hover_text("Edit in high dynamic range (extended highlights)");
+            if s.hdr.enabled {
+                ui.checkbox(&mut s.hdr.visualize, "Visualize HDR");
+            }
+        });
+        if s.hdr.enabled {
+            slider(ui, &mut s.hdr.max_headroom, SliderSpec::new("HDR headroom", 1.0, 4.0, 4.0).dec(1).suffix(" st"));
+            ui.collapsing("SDR settings", |ui| {
+                slider(ui, &mut s.hdr.sdr_brightness, SliderSpec::new("Brightness", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_clarity, SliderSpec::new("Clarity", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
+                slider(ui, &mut s.hdr.sdr_blend, SliderSpec::new("Blend", 0.0, 100.0, 0.0));
+            });
+        }
+    });
+    s.panels.basic = light_on;
+
+    // ------------------------------------------------------------- Color
+    let mut color_on = s.panels.color;
+    section(ui, "Color", Some(&mut color_on), false, |ui| {
         ui.horizontal(|ui| {
             let full_w = ui.available_width();
             egui::ComboBox::from_id_salt("wb").selected_text(s.wb_mode.label()).width((full_w - 36.0).max(60.0)).show_ui(ui, |ui| {
@@ -234,53 +266,41 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             s.tint = ti;
         }
 
-        widgets::sub_header_tone(
-            ui,
-            || pc.actions.push(Action::AutoTone),
-            || {
-                s.exposure = 0.0;
-                s.contrast = 0.0;
-                s.highlights = 0.0;
-                s.shadows = 0.0;
-                s.whites = 0.0;
-                s.blacks = 0.0;
-            },
-        );
-        let max_ev = if s.hdr.enabled { 10.0 } else { 5.0 };
-        slider(ui, &mut s.exposure, SliderSpec::new("Exposure", -max_ev, max_ev, 0.0).dec(2));
-        slider(ui, &mut s.contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.blacks, SliderSpec::new("Blacks", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.vibrance, SliderSpec::new("Vibrance", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.saturation, SliderSpec::new("Saturation", -100.0, 100.0, 0.0));
+    });
+    s.panels.color = color_on;
 
-        widgets::sub_header(ui, "PRESENCE");
+    // ------------------------------------------------------------- Effects
+    let mut fx_on = s.panels.effects;
+    section(ui, "Effects", Some(&mut fx_on), false, |ui| {
         slider(ui, &mut s.texture, SliderSpec::new("Texture", -100.0, 100.0, 0.0));
         slider(ui, &mut s.clarity, SliderSpec::new("Clarity", -100.0, 100.0, 0.0));
         slider(ui, &mut s.dehaze, SliderSpec::new("Dehaze", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.vibrance, SliderSpec::new("Vibrance", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.saturation, SliderSpec::new("Saturation", -100.0, 100.0, 0.0));
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut s.hdr.enabled, "HDR").on_hover_text("Edit in high dynamic range (extended highlights)");
-            if s.hdr.enabled {
-                ui.checkbox(&mut s.hdr.visualize, "Visualize HDR");
-            }
-        });
-        if s.hdr.enabled {
-            slider(ui, &mut s.hdr.max_headroom, SliderSpec::new("HDR headroom", 1.0, 4.0, 4.0).dec(1).suffix(" st"));
-            ui.collapsing("SDR settings", |ui| {
-                slider(ui, &mut s.hdr.sdr_brightness, SliderSpec::new("Brightness", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_clarity, SliderSpec::new("Clarity", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
-                slider(ui, &mut s.hdr.sdr_blend, SliderSpec::new("Blend", 0.0, 100.0, 0.0));
+        ui.label(RichText::new("Vignette").strong());
+        egui::ComboBox::from_id_salt("vigstyle")
+            .selected_text(match s.vignette.style {
+                VignetteStyle::HighlightPriority => "Highlight priority",
+                VignetteStyle::ColorPriority => "Color priority",
+                VignetteStyle::PaintOverlay => "Paint overlay",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.vignette.style, VignetteStyle::HighlightPriority, "Highlight priority");
+                ui.selectable_value(&mut s.vignette.style, VignetteStyle::ColorPriority, "Color priority");
+                ui.selectable_value(&mut s.vignette.style, VignetteStyle::PaintOverlay, "Paint overlay");
             });
-        }
+        let gv = widgets::grad_bw();
+        slider(ui, &mut s.vignette.amount, SliderSpec::new("Vignette", -100.0, 100.0, 0.0).grad(&gv));
+        slider(ui, &mut s.vignette.midpoint, SliderSpec::new("Midpoint", 0.0, 100.0, 50.0));
+        slider(ui, &mut s.vignette.roundness, SliderSpec::new("Roundness", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.vignette.feather, SliderSpec::new("Feather", 0.0, 100.0, 50.0));
+        slider(ui, &mut s.vignette.highlights, SliderSpec::new("Highlights", 0.0, 100.0, 0.0));
+        ui.label(RichText::new("Grain").strong());
+        slider(ui, &mut s.grain.amount, SliderSpec::new("Grain", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.grain.size, SliderSpec::new("Size", 0.0, 100.0, 25.0));
+        slider(ui, &mut s.grain.roughness, SliderSpec::new("Roughness", 0.0, 100.0, 50.0));
     });
-    s.panels.basic = basic_on;
+    s.panels.effects = fx_on;
 
     // ------------------------------------------------------------- Curve
     let mut curve_on = s.panels.curve;
@@ -356,33 +376,6 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     });
     s.panels.curve = curve_on;
 
-    // ------------------------------------------------------------- Detail
-    let mut detail_on = s.panels.detail;
-    section(ui, "Detail", Some(&mut detail_on), false, |ui| {
-        ui.label(RichText::new("Sharpening").strong());
-        slider(ui, &mut s.sharpen.amount, SliderSpec::new("Sharpening", 0.0, 150.0, if is_raw { 40.0 } else { 0.0 }));
-        slider(ui, &mut s.sharpen.radius, SliderSpec::new("Radius", 0.5, 3.0, 1.0).dec(1));
-        slider(ui, &mut s.sharpen.detail, SliderSpec::new("Detail", 0.0, 100.0, 25.0));
-        slider(ui, &mut s.sharpen.masking, SliderSpec::new("Masking", 0.0, 100.0, 0.0));
-        ui.label(RichText::new("Noise reduction").strong());
-        slider(ui, &mut s.nr.luminance, SliderSpec::new("Noise reduction", 0.0, 100.0, 0.0));
-        slider(ui, &mut s.nr.luminance_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
-        slider(ui, &mut s.nr.luminance_contrast, SliderSpec::new("Contrast", 0.0, 100.0, 0.0));
-        slider(ui, &mut s.nr.color, SliderSpec::new("Color noise reduction", 0.0, 100.0, if is_raw { 25.0 } else { 0.0 }));
-        slider(ui, &mut s.nr.color_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
-        slider(ui, &mut s.nr.color_smoothness, SliderSpec::new("Smoothness", 0.0, 100.0, 50.0));
-        ui.label(RichText::new("Enhance").strong());
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut s.enhance.denoise, "Denoise");
-            if s.enhance.denoise {
-                ui.add(egui::Slider::new(&mut s.enhance.denoise_amount, 0.0..=100.0).show_value(true));
-            }
-        });
-        ui.checkbox(&mut s.enhance.raw_details, "Raw Details").on_hover_text("Higher quality demosaic for finer detail");
-        ui.checkbox(&mut s.enhance.super_resolution, "Super Resolution (2×)").on_hover_text("Doubles linear resolution on export");
-    });
-    s.panels.detail = detail_on;
-
     // ------------------------------------------------------------- Color Mixer
     let mut mixer_on = s.panels.mixer;
     let title = if s.is_bw() { "B&W Mixer" } else { "Color Mixer" };
@@ -448,6 +441,33 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         grading_ui(ui, &mut s.grading, &mut st.grading_view, "global");
     });
     s.panels.grading = grade_on;
+
+    // ------------------------------------------------------------- Detail
+    let mut detail_on = s.panels.detail;
+    section(ui, "Detail", Some(&mut detail_on), false, |ui| {
+        ui.label(RichText::new("Sharpening").strong());
+        slider(ui, &mut s.sharpen.amount, SliderSpec::new("Sharpening", 0.0, 150.0, if is_raw { 40.0 } else { 0.0 }));
+        slider(ui, &mut s.sharpen.radius, SliderSpec::new("Radius", 0.5, 3.0, 1.0).dec(1));
+        slider(ui, &mut s.sharpen.detail, SliderSpec::new("Detail", 0.0, 100.0, 25.0));
+        slider(ui, &mut s.sharpen.masking, SliderSpec::new("Masking", 0.0, 100.0, 0.0));
+        ui.label(RichText::new("Noise reduction").strong());
+        slider(ui, &mut s.nr.luminance, SliderSpec::new("Noise reduction", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.nr.luminance_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
+        slider(ui, &mut s.nr.luminance_contrast, SliderSpec::new("Contrast", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.nr.color, SliderSpec::new("Color noise reduction", 0.0, 100.0, if is_raw { 25.0 } else { 0.0 }));
+        slider(ui, &mut s.nr.color_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
+        slider(ui, &mut s.nr.color_smoothness, SliderSpec::new("Smoothness", 0.0, 100.0, 50.0));
+        ui.label(RichText::new("Enhance").strong());
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.enhance.denoise, "Denoise");
+            if s.enhance.denoise {
+                ui.add(egui::Slider::new(&mut s.enhance.denoise_amount, 0.0..=100.0).show_value(true));
+            }
+        });
+        ui.checkbox(&mut s.enhance.raw_details, "Raw Details").on_hover_text("Higher quality demosaic for finer detail");
+        ui.checkbox(&mut s.enhance.super_resolution, "Super Resolution (2×)").on_hover_text("Doubles linear resolution on export");
+    });
+    s.panels.detail = detail_on;
 
     // ------------------------------------------------------------- Optics
     let mut optics_on = s.panels.optics;
@@ -576,34 +596,6 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         }
     });
     s.panels.geometry = geo_on;
-
-    // ------------------------------------------------------------- Effects
-    let mut fx_on = s.panels.effects;
-    section(ui, "Effects", Some(&mut fx_on), false, |ui| {
-        ui.label(RichText::new("Vignette").strong());
-        egui::ComboBox::from_id_salt("vigstyle")
-            .selected_text(match s.vignette.style {
-                VignetteStyle::HighlightPriority => "Highlight priority",
-                VignetteStyle::ColorPriority => "Color priority",
-                VignetteStyle::PaintOverlay => "Paint overlay",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut s.vignette.style, VignetteStyle::HighlightPriority, "Highlight priority");
-                ui.selectable_value(&mut s.vignette.style, VignetteStyle::ColorPriority, "Color priority");
-                ui.selectable_value(&mut s.vignette.style, VignetteStyle::PaintOverlay, "Paint overlay");
-            });
-        let gv = widgets::grad_bw();
-        slider(ui, &mut s.vignette.amount, SliderSpec::new("Vignette", -100.0, 100.0, 0.0).grad(&gv));
-        slider(ui, &mut s.vignette.midpoint, SliderSpec::new("Midpoint", 0.0, 100.0, 50.0));
-        slider(ui, &mut s.vignette.roundness, SliderSpec::new("Roundness", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.vignette.feather, SliderSpec::new("Feather", 0.0, 100.0, 50.0));
-        slider(ui, &mut s.vignette.highlights, SliderSpec::new("Highlights", 0.0, 100.0, 0.0));
-        ui.label(RichText::new("Grain").strong());
-        slider(ui, &mut s.grain.amount, SliderSpec::new("Grain", 0.0, 100.0, 0.0));
-        slider(ui, &mut s.grain.size, SliderSpec::new("Size", 0.0, 100.0, 25.0));
-        slider(ui, &mut s.grain.roughness, SliderSpec::new("Roughness", 0.0, 100.0, 50.0));
-    });
-    s.panels.effects = fx_on;
 
     // ------------------------------------------------------------- Calibration
     let mut cal_on = s.panels.calibration;

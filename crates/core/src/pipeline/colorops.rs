@@ -171,8 +171,8 @@ pub fn apply(img: &mut Image3, cp: &ColorParams, fields: &LocalFields) {
     let prof_sat = 1.0 + (prof.saturation - 1.0) * pa;
     let band_sat: [f32; 8] = prof.band_sat.map(|v| 1.0 + (v - 1.0) * pa);
     let band_hue: [f32; 8] = prof.band_hue.map(|v| v * pa);
-    let vib = if panels.basic { s.vibrance / 100.0 } else { 0.0 };
-    let sat = if panels.basic { s.saturation / 100.0 } else { 0.0 };
+    let vib = if panels.color { s.vibrance / 100.0 } else { 0.0 };
+    let sat = if panels.color { s.saturation / 100.0 } else { 0.0 };
     let hsl: [Hsl; 8] = if panels.mixer { s.hsl } else { [Hsl::default(); 8] };
     let hsl_active = hsl.iter().any(|h| *h != Hsl::default());
     let gray_mix = if panels.mixer { s.gray_mix } else { [0.0; 8] };

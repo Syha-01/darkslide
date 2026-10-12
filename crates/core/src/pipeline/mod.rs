@@ -54,10 +54,10 @@ struct Caches {
 fn ctx_key(s: &DevelopSettings) -> u64 {
     #[derive(serde::Serialize)]
     struct K<'a> {
-        wb: (crate::params::WbMode, f32, f32),
+        wb: (crate::params::WbMode, f32, f32, bool),
         tone: [f32; 9],
         profile: (&'a str, f32),
-        panels: (bool, bool, bool),
+        panels: (bool, bool, bool, bool),
         lens: &'a crate::params::LensCorrection,
         transform: &'a crate::params::Transform,
         crop: &'a crate::params::Crop,
@@ -66,10 +66,10 @@ fn ctx_key(s: &DevelopSettings) -> u64 {
         retouch: &'a [crate::params::RetouchSpot],
     }
     hash_of(&K {
-        wb: (s.wb_mode, s.temperature, s.tint),
+        wb: (s.wb_mode, s.temperature, s.tint, s.panels.color),
         tone: [s.exposure, s.contrast, s.highlights, s.shadows, s.whites, s.blacks, s.clarity, s.texture, s.dehaze],
         profile: (&s.profile, s.profile_amount),
-        panels: (s.panels.basic, s.panels.optics, s.panels.calibration),
+        panels: (s.panels.basic, s.panels.effects, s.panels.optics, s.panels.calibration),
         lens: &s.lens,
         transform: &s.transform,
         crop: &s.crop,
@@ -315,8 +315,10 @@ impl Engine {
     /// Resolved white point chromaticity for the settings.
     pub fn white_xy(&self, s: &DevelopSettings) -> [f32; 2] {
         let src = &self.source;
+        // a hidden Color panel shows the image as shot
+        let mode = if s.panels.color { s.wb_mode } else { WbMode::AsShot };
         if !src.is_raw {
-            let (t, tint) = match s.wb_mode {
+            let (t, tint) = match mode {
                 WbMode::AsShot => (0.0, 0.0),
                 WbMode::Auto => {
                     let xy = self.auto_wb_xy();
@@ -327,7 +329,7 @@ impl Engine {
             // relative scale: +100 = about one stop warmer in mired terms
             return color::temp_tint_to_xy(6504.0 * (t / 100.0 * 0.85).exp2(), tint * 1.2);
         }
-        match s.wb_mode {
+        match mode {
             WbMode::AsShot => src.as_shot_xy(),
             WbMode::Auto => self.auto_wb_xy(),
             WbMode::Custom => color::temp_tint_to_xy(s.temperature, s.tint),
@@ -651,6 +653,7 @@ impl Engine {
     fn tone_globals(&self, s: &DevelopSettings) -> ToneGlobals {
         let b = s.panels.basic;
         let pick = |v: f32| if b { v } else { 0.0 };
+        let fx = |v: f32| if s.panels.effects { v } else { 0.0 };
         ToneGlobals {
             exposure: pick(s.exposure) + self.baseline_ev(s),
             contrast: pick(s.contrast),
@@ -658,9 +661,9 @@ impl Engine {
             shadows: pick(s.shadows),
             whites: pick(s.whites),
             blacks: pick(s.blacks),
-            clarity: pick(s.clarity),
-            texture: pick(s.texture),
-            dehaze: pick(s.dehaze),
+            clarity: fx(s.clarity),
+            texture: fx(s.texture),
+            dehaze: fx(s.dehaze),
             hdr: s.hdr.enabled,
             hdr_headroom: s.hdr.max_headroom,
         }

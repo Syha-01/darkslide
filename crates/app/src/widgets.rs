@@ -438,53 +438,6 @@ pub fn grad_band_lum(center: f32) -> Vec<Color32> {
     vec![hue_color(center, 0.8, 0.15), hue_color(center, 0.6, 0.95)]
 }
 
-pub fn sub_header(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(8.0);
-    let total_w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(total_w, 15.0), Sense::hover());
-    let painter = ui.painter_at(rect);
-    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(10.5), Color32::from_rgb(140, 140, 140));
-    let text_w = galley.size().x;
-    painter.galley(rect.left_top(), galley, Color32::from_rgb(140, 140, 140));
-    if text_w + 12.0 < rect.width() {
-        painter.line_segment(
-            [pos2(rect.left() + text_w + 8.0, rect.center().y), pos2(rect.right(), rect.center().y)],
-            Stroke::new(1.0, Color32::from_rgb(42, 42, 42)),
-        );
-    }
-    ui.add_space(3.0);
-}
-
-pub fn sub_header_tone(ui: &mut egui::Ui, on_auto: impl FnOnce(), on_default: impl FnOnce()) {
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("TONE").size(10.5).color(Color32::from_rgb(140, 140, 140)));
-        let sep_x = ui.cursor().left() + 4.0;
-        let sep_y = ui.cursor().center().y;
-        let right_limit = ui.max_rect().right() - 110.0;
-        if sep_x < right_limit {
-            ui.painter().line_segment([pos2(sep_x, sep_y), pos2(right_limit, sep_y)], Stroke::new(1.0, Color32::from_rgb(42, 42, 42)));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let def_btn = egui::Button::new(RichText::new("Default").size(11.0).color(Color32::from_rgb(205, 205, 205)))
-                .fill(Color32::from_rgb(38, 38, 38))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(52, 52, 52)))
-                .corner_radius(2.0);
-            if ui.add(def_btn).on_hover_text("Reset Tone sliders").clicked() {
-                on_default();
-            }
-            let auto_btn = egui::Button::new(RichText::new("Auto").size(11.0).color(Color32::from_rgb(205, 205, 205)))
-                .fill(Color32::from_rgb(38, 38, 38))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(52, 52, 52)))
-                .corner_radius(2.0);
-            if ui.add(auto_btn).on_hover_text("Auto tone (Ctrl+U)").clicked() {
-                on_auto();
-            }
-        });
-    });
-    ui.add_space(3.0);
-}
-
 /// Collapsible section with an enable toggle (ACR's eye icon).
 pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, default_open: bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
     let id = ui.make_persistent_id(("section", title));

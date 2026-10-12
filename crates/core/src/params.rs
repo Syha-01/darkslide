@@ -644,7 +644,10 @@ impl Calibration {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanelToggles {
+    /// Light panel (tone); the name predates ACR splitting up Basic.
     pub basic: bool,
+    /// Color panel: white balance, vibrance, saturation.
+    pub color: bool,
     pub curve: bool,
     pub detail: bool,
     pub mixer: bool,
@@ -660,6 +663,7 @@ impl Default for PanelToggles {
     fn default() -> Self {
         Self {
             basic: true,
+            color: true,
             curve: true,
             detail: true,
             mixer: true,
