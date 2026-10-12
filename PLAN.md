@@ -527,6 +527,19 @@ Session 1, later still:
   strokes filled at reduced size. Full-res edge stroke 8.7 s → 0.37 s.
 - Reference ACR screenshots: jkost.com/blog/?p=17009 (v12.3 UI, still current).
 
+### Session 3 (2026-10-11 night)
+- Reset-all button with confirmation; JPEG XL export; on-disk thumbnail cache
+  fed by edited renders; lensfun DB download; lateral CA estimator rewritten
+  (sub-pixel edge alignment + translation term, unit test with injected CA).
+- UI: Basic split into Light / Color / Effects (own eye toggles: `panels.basic`
+  = Light, new `panels.color`); empty canvas is a drop zone with Add photo(s);
+  palette in theme.rs (Classic default, Camera Raw grey/darkest in Prefs);
+  compact sliders; Phosphor icons; presets panel rebuilt (presets_panel.rs:
+  search, groups, live thumbnails, favourites); context cursors in viewer.rs
+  (`cursor_for` mirrors begin_tool_drag hit tests, drawn rotate cursor).
+- Published to github.com/Syha-01/darkslide (GPL-3.0); release tarball from
+  `cargo build --release` + packaging/install-binary.sh.
+
 ### How to resume
 1. `export PATH=$HOME/.cargo/bin:$PATH; scripts/fetch-testdata.sh`
 2. `cargo test && cargo build --release -p darkslide --features screenshot`
