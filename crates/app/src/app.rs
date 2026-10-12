@@ -868,11 +868,22 @@ impl App {
     }
 
     pub fn copy_settings(&mut self, subset: Option<crate::dialogs::Subset>) {
-        if let Some(d) = self.doc() {
-            self.clipboard = Some(d.settings.clone());
-            self.clipboard_subset = subset;
-            self.status = "Settings copied".into();
+        if let Some(i) = self.current {
+            self.copy_settings_of(i, subset);
         }
+    }
+
+    /// Copy one photo's settings; one never opened has them only in its sidecar.
+    pub fn copy_settings_of(&mut self, i: usize, subset: Option<crate::dialogs::Subset>) {
+        let d = &self.docs[i];
+        let s = if d.loaded {
+            d.settings.clone()
+        } else {
+            darkslide_core::xmp::read_sidecar(&d.path, d.raw).map(|(s, _)| s).unwrap_or_else(|| DevelopSettings::defaults_for(d.raw))
+        };
+        self.clipboard = Some(s);
+        self.clipboard_subset = subset;
+        self.status = "Settings copied".into();
     }
 
     /// A dialog that owns the keyboard is open, so app shortcuts wait.

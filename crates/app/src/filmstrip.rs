@@ -157,10 +157,7 @@ pub fn filmstrip(app: &mut App, ui: &mut egui::Ui) {
         match act {
             MenuAct::Rating(r) => app.set_rating(r),
             MenuAct::Label(l) => app.toggle_label(l),
-            MenuAct::Copy => {
-                app.select(i);
-                app.copy_settings(None);
-            }
+            MenuAct::Copy => app.copy_settings_of(i, None),
             MenuAct::Paste => app.paste_settings(None),
             MenuAct::Reveal => {
                 if let Some(dir) = app.docs[i].path.parent() {
