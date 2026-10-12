@@ -558,22 +558,36 @@ impl Engine {
         Some(l)
     }
 
-    /// "Constrain crop": shrink the crop around its centre until it only
-    /// covers source pixels after transforms and lens corrections.
+    /// "Constrain crop": shrink the crop around its centre, as little as
+    /// possible, until it only covers source pixels after transforms and lens
+    /// corrections.
     pub fn constrain_crop(&self, s: &mut DevelopSettings) {
         let (fw, fh) = self.full_size();
-        for _ in 0..60 {
-            if self.geometry(s, fw, fh, false).crop_inside_source() {
-                return;
-            }
-            let c = &mut s.crop;
-            let (cx, cy) = ((c.left + c.right) / 2.0, (c.top + c.bottom) / 2.0);
-            let k = 0.97;
-            c.left = cx - (cx - c.left) * k;
-            c.right = cx + (c.right - cx) * k;
-            c.top = cy - (cy - c.top) * k;
-            c.bottom = cy + (c.bottom - cy) * k;
+        if self.geometry(s, fw, fh, false).crop_inside_source() {
+            return;
         }
+        let c0 = s.crop;
+        let (cx, cy) = ((c0.left + c0.right) / 2.0, (c0.top + c0.bottom) / 2.0);
+        let scaled = |k: f32| {
+            let mut c = c0;
+            c.left = cx - (cx - c0.left) * k;
+            c.right = cx + (c0.right - cx) * k;
+            c.top = cy - (cy - c0.top) * k;
+            c.bottom = cy + (c0.bottom - cy) * k;
+            c
+        };
+        // largest scale that fits
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..18 {
+            let mid = (lo + hi) / 2.0;
+            s.crop = scaled(mid);
+            if self.geometry(s, fw, fh, false).crop_inside_source() {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        s.crop = scaled(lo.max(0.02));
     }
 
     pub fn set_depth(&self, depth: Option<Plane>) {

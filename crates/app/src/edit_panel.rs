@@ -25,6 +25,20 @@ pub enum Pick {
     Upright,
 }
 
+impl Pick {
+    pub fn label(self) -> &'static str {
+        match self {
+            Pick::None => "",
+            Pick::WhiteBalance => "White balance picker",
+            Pick::PointColor => "Point color picker",
+            Pick::Sampler => "Color sampler",
+            Pick::TatCurve => "Targeted curve adjustment",
+            Pick::TatMixer(_) => "Targeted color mixer adjustment",
+            Pick::Upright => "Guided Upright",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CurveMode {
     #[default]
@@ -588,8 +602,8 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         slider(ui, &mut s.transform.offset_y, SliderSpec::new("Offset Y", -100.0, 100.0, 0.0).dec(1));
         let was = s.transform.constrain_crop;
         ui.checkbox(&mut s.transform.constrain_crop, "Constrain crop");
-        if s.transform.constrain_crop && !was {
-            // start from the full frame so the crop can grow back
+        if s.transform.constrain_crop && !was && s.crop.left == 0.0 && s.crop.top == 0.0 && s.crop.right == 1.0 && s.crop.bottom == 1.0 {
+            // an untouched crop starts from the full frame; a user's crop is kept
             crate::tool_panels::reset_crop(s);
         }
         if s.transform.constrain_crop {

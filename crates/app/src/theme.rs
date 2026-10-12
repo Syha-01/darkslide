@@ -135,7 +135,7 @@ pub const DARKEST: Palette = Palette {
 
 static THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
-pub const NAMES: [&str; 3] = ["Classic", "Camera Raw grey", "Camera Raw darkest"];
+pub const NAMES: [&str; 3] = ["Near-black", "Camera Raw grey", "Camera Raw darkest"];
 
 pub fn pal() -> &'static Palette {
     match THEME.load(std::sync::atomic::Ordering::Relaxed) {

@@ -119,7 +119,8 @@ pub struct App {
     pub drag: crate::viewer::DragState,
     pub view_rect: egui::Rect,
     pub fullscreen: bool,
-    pub ai_jobs: Arc<Mutex<Vec<(u64, usize, String)>>>,
+    /// Finished detections: doc, mask, kind, raster, and the message to show.
+    pub ai_jobs: Arc<Mutex<Vec<(u64, usize, darkslide_core::params::AiMaskKind, String, String)>>>,
     pub filter_rating: i32,
     pub filter_label: ColorLabel,
     pub pending_actions: Vec<Action>,
@@ -132,6 +133,16 @@ pub struct App {
     pub lens_dl: Arc<Mutex<Option<Result<usize, String>>>>,
     /// "Reset all settings?" confirmation is showing.
     pub confirm_reset: bool,
+    /// The crop when the crop tool was entered, for Esc to restore.
+    pub crop_on_enter: Option<darkslide_core::params::Crop>,
+    prev_tool: Tool,
+    /// Tab pressed outside a text field (taken from egui before it moves focus).
+    tab_pressed: bool,
+    /// Subset chosen when the clipboard was filled; plain paste uses it.
+    pub clipboard_subset: Option<crate::dialogs::Subset>,
+    last_overlay: Color32,
+    /// Status text and when it was first shown, so it can fade out.
+    status_seen: (String, std::time::Instant),
 }
 
 impl App {
@@ -192,7 +203,15 @@ impl App {
             distract_jobs: Arc::new(Mutex::new(vec![])),
             confirm_reset: false,
             lens_dl: Arc::new(Mutex::new(None)),
+            crop_on_enter: None,
+            prev_tool: Tool::Edit,
+            tab_pressed: false,
+            clipboard_subset: None,
+            status_seen: (String::new(), std::time::Instant::now()),
+            last_overlay: Color32::TRANSPARENT,
         };
+        // Ctrl+=/− zoom the photo, not the whole interface
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         app.edit.show_scope = app.prefs.show_vectorscope;
         app.open_paths(paths);
         app
@@ -340,17 +359,11 @@ impl App {
             }
         }
         // finished AI mask jobs
-        let done: Vec<(u64, usize, String)> = std::mem::take(&mut *self.ai_jobs.lock().unwrap());
-        for (id, mi, raster) in done {
+        let done = std::mem::take(&mut *self.ai_jobs.lock().unwrap());
+        for (id, mi, kind, raster, msg) in done {
             if let Some(d) = self.docs.iter_mut().find(|d| d.id == id) {
-                if let Some(m) = d.settings.masks.get_mut(mi) {
-                    for c in m.components.iter_mut() {
-                        if let darkslide_core::params::MaskShape::Ai { raster: r @ None, .. } = &mut c.shape {
-                            *r = Some(raster.clone());
-                            break;
-                        }
-                    }
-                }
+                d.fill_ai_raster(mi, kind, &raster);
+                self.status = msg;
             }
         }
     }
@@ -817,9 +830,19 @@ impl App {
                     let busy = self.busy.clone();
                     *busy.lock().unwrap() = Some(format!("Detecting {}…", kind.label()));
                     std::thread::spawn(move || {
-                        let plane = darkslide_core::ai::detect(&e, &s, kind, hint);
+                        let (plane, model) = darkslide_core::ai::detect_with_source(&e, &s, kind, hint);
+                        let cover = plane.data.iter().sum::<f32>() / plane.data.len().max(1) as f32;
+                        let name = kind.label();
+                        // say plainly when nothing was found or no model was used
+                        let msg = if cover < 0.003 {
+                            format!("No {} found in this photo", name.to_lowercase())
+                        } else if model {
+                            format!("{name} detected")
+                        } else {
+                            format!("{name} estimated from colour and texture (no AI model installed)")
+                        };
                         let raster = darkslide_core::pipeline::local::encode_raster(&plane);
-                        jobs.lock().unwrap().push((id, mi, raster));
+                        jobs.lock().unwrap().push((id, mi, kind, raster, msg));
                         *busy.lock().unwrap() = None;
                     });
                 }
@@ -827,11 +850,17 @@ impl App {
         }
     }
 
-    pub fn copy_settings(&mut self) {
+    pub fn copy_settings(&mut self, subset: Option<crate::dialogs::Subset>) {
         if let Some(d) = self.doc() {
             self.clipboard = Some(d.settings.clone());
+            self.clipboard_subset = subset;
             self.status = "Settings copied".into();
         }
+    }
+
+    /// A dialog that owns the keyboard is open, so app shortcuts wait.
+    pub fn dialog_open(&self) -> bool {
+        self.export.open || self.copy.open || self.merge.open.is_some() || self.show_prefs || self.show_about || self.confirm_reset
     }
 
     pub fn paste_settings(&mut self, subset: Option<&crate::dialogs::Subset>) {
@@ -840,7 +869,7 @@ impl App {
             let sel: Vec<usize> = self.docs.iter().enumerate().filter(|(_, d)| d.selected).map(|(i, _)| i).collect();
             if sel.is_empty() { self.current.into_iter().collect() } else { sel }
         };
-        let full = crate::dialogs::Subset::all();
+        let full = self.clipboard_subset.clone().unwrap_or_else(crate::dialogs::Subset::all);
         let subset = subset.unwrap_or(&full);
         for i in targets {
             let d = &mut self.docs[i];
@@ -858,13 +887,14 @@ impl App {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
+        let tab = std::mem::take(&mut self.tab_pressed);
+        // only a focused text field takes the keys; a focused button doesn't
+        if ctx.text_edit_focused() || self.dialog_open() {
             return;
         }
-        use egui::{Key, Modifiers};
+        use egui::Key;
         let (cmd, shift, alt) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
         let pressed = |k: Key| ctx.input_mut(|i| i.key_pressed(k));
-        let _ = Modifiers::NONE;
         if cmd && pressed(Key::Z) {
             if shift {
                 if let Some(d) = self.doc_mut() {
@@ -887,16 +917,19 @@ impl App {
                 self.pending_actions.push(Action::AutoTone);
             }
         }
-        if cmd && pressed(Key::S) {
+        if cmd && pressed(Key::S) && self.doc().is_some() {
             self.export.open = true;
         }
-        if cmd && alt && pressed(Key::C) {
-            self.copy.open_for_copy();
-            self.copy_settings();
-        } else if cmd && pressed(Key::C) {
-            self.copy_settings();
+        if cmd && pressed(Key::C) && self.doc().is_some() {
+            if alt {
+                self.copy.open_for_copy();
+            } else {
+                self.copy_settings(None);
+                // egui-winit only sends Ctrl+V on while the system clipboard holds text
+                ctx.copy_text("Darkslide develop settings".into());
+            }
         }
-        if cmd && pressed(Key::V) {
+        if cmd && pressed(Key::V) && self.clipboard.is_some() {
             if alt {
                 self.copy.open_for_paste();
             } else {
@@ -911,6 +944,9 @@ impl App {
             } else if let Some(files) = crate::dialogs::pick_files() {
                 self.open_paths(files);
             }
+        }
+        if cmd && pressed(Key::Q) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if cmd && pressed(Key::Quote) {
             self.grid = !self.grid;
@@ -930,38 +966,46 @@ impl App {
         if cmd || alt {
             return;
         }
+        let tool = self.tools.tool;
         if pressed(Key::Z) {
             self.zoom = if self.zoom == Zoom::Fit { Zoom::Scale(1.0) } else { Zoom::Fit };
         }
         if pressed(Key::U) {
             self.clip_s = !self.clip_s;
         }
+        // in the crop tool O and X work the crop, as in Lightroom
         if pressed(Key::O) {
-            self.clip_h = !self.clip_h;
+            if tool == Tool::Crop {
+                self.tools.crop_overlay = self.tools.crop_overlay.next();
+            } else {
+                self.clip_h = !self.clip_h;
+            }
+        }
+        if pressed(Key::X) && tool == Tool::Crop {
+            self.swap_crop_orientation();
         }
         if pressed(Key::Q) {
             self.ba = self.ba.next();
         }
-        if pressed(Key::Backslash) || pressed(Key::P) {
+        if pressed(Key::P) && shift {
+            self.set_tool(Tool::Presets);
+        } else if pressed(Key::Backslash) || pressed(Key::P) {
             self.show_before = !self.show_before;
         }
         if pressed(Key::I) {
             self.pick = if self.pick == Pick::WhiteBalance { Pick::None } else { Pick::WhiteBalance };
         }
         if pressed(Key::E) {
-            self.tools.tool = Tool::Edit;
+            self.set_tool(Tool::Edit);
         }
-        if pressed(Key::C) {
-            self.tools.tool = if self.tools.tool == Tool::Crop { Tool::Edit } else { Tool::Crop };
-        }
-        if pressed(Key::B) {
-            self.tools.tool = Tool::Remove;
-        }
-        if pressed(Key::M) {
-            self.tools.tool = Tool::Masking;
+        // tool keys toggle back to Edit, like C always did
+        for (k, t) in [(Key::C, Tool::Crop), (Key::B, Tool::Remove), (Key::M, Tool::Masking)] {
+            if pressed(k) {
+                self.set_tool(if tool == t { Tool::Edit } else { t });
+            }
         }
         if pressed(Key::S) && !shift {
-            self.tools.tool = Tool::Snapshots;
+            self.set_tool(if tool == Tool::Snapshots { Tool::Edit } else { Tool::Snapshots });
         }
         if pressed(Key::Y) {
             self.tools.show_mask_overlay = !self.tools.show_mask_overlay;
@@ -970,18 +1014,14 @@ impl App {
             self.fullscreen = !self.fullscreen;
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
         }
-        if pressed(Key::Tab) {
+        if tab {
             self.show_filmstrip = !self.show_filmstrip;
         }
-        if pressed(Key::Enter) && self.tools.tool == Tool::Crop {
-            self.tools.tool = Tool::Edit;
+        if pressed(Key::Enter) && tool == Tool::Crop {
+            self.commit_crop();
         }
         if pressed(Key::Escape) {
-            if self.pick != Pick::None {
-                self.pick = Pick::None;
-            } else if self.tools.tool == Tool::Crop {
-                self.tools.tool = Tool::Edit;
-            }
+            self.escape();
         }
         if pressed(Key::ArrowRight) {
             self.step_image(1);
@@ -989,26 +1029,24 @@ impl App {
         if pressed(Key::ArrowLeft) {
             self.step_image(-1);
         }
-        if pressed(Key::OpenBracket) {
-            self.tools.brush.size *= 0.85;
-            self.tools.spot_size *= 0.85;
-        }
-        if pressed(Key::CloseBracket) {
-            self.tools.brush.size *= 1.18;
-            self.tools.spot_size *= 1.18;
-        }
-        if pressed(Key::Delete) || pressed(Key::Backspace) {
-            let (tool, spot) = (self.tools.tool, self.tools.selected_spot);
-            if let Some(d) = self.doc_mut() {
-                if tool == Tool::Remove {
-                    if let Some(i) = spot.filter(|&i| i < d.settings.retouch.len()) {
-                        d.settings.retouch.remove(i);
+        // brackets size the brush of the tool in use (the selected spot too)
+        for (k, f) in [(Key::OpenBracket, 0.85f32), (Key::CloseBracket, 1.18)] {
+            if pressed(k) {
+                match tool {
+                    Tool::Masking => self.tools.brush.size = (self.tools.brush.size * f).clamp(0.001, 0.3),
+                    Tool::Remove => {
+                        self.tools.spot_size = (self.tools.spot_size * f).clamp(0.001, 0.2);
+                        let (sel, r) = (self.tools.selected_spot, self.tools.spot_size);
+                        if let Some(sp) = sel.and_then(|i| self.doc_mut().and_then(|d| d.settings.retouch.get_mut(i))) {
+                            sp.radius = r;
+                        }
                     }
+                    _ => {}
                 }
             }
-            if tool == Tool::Remove {
-                self.tools.selected_spot = None;
-            }
+        }
+        if pressed(Key::Delete) || pressed(Key::Backspace) {
+            self.delete_selected();
         }
         // ratings 0-5, labels 6-9
         let keys = [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
@@ -1024,6 +1062,96 @@ impl App {
                     }
                     d.dirty = true;
                     d.last_change = Some(std::time::Instant::now());
+                }
+            }
+        }
+    }
+
+    pub fn set_tool(&mut self, t: Tool) {
+        self.tools.tool = t;
+        self.pick = Pick::None;
+    }
+
+    /// Keep the crop and go back to editing.
+    pub fn commit_crop(&mut self) {
+        self.tools.straighten = false;
+        self.crop_on_enter = None;
+        self.set_tool(Tool::Edit);
+    }
+
+    pub fn swap_crop_orientation(&mut self) {
+        if let Some(d) = self.doc_mut()
+            && let Some(e) = d.engine.clone()
+        {
+            tool_panels::swap_orientation(&mut d.settings, &e);
+        }
+    }
+
+    /// Esc backs out one layer: picker, then the tool's selection or armed
+    /// sub-tool, then the tool itself (the crop tool also undoes its changes).
+    fn escape(&mut self) {
+        if self.profiles.open {
+            self.profiles.open = false;
+            return;
+        }
+        if self.show_shortcuts {
+            self.show_shortcuts = false;
+            return;
+        }
+        if self.pick != Pick::None {
+            self.pick = Pick::None;
+            return;
+        }
+        let t = &mut self.tools;
+        match t.tool {
+            Tool::Crop if t.straighten => t.straighten = false,
+            Tool::Crop => {
+                if let Some(c) = self.crop_on_enter.take()
+                    && let Some(d) = self.doc_mut()
+                {
+                    d.settings.crop = c;
+                }
+                self.set_tool(Tool::Edit);
+            }
+            Tool::Remove if t.selected_spot.is_some() => t.selected_spot = None,
+            Tool::Masking if t.mask_tool != tool_panels::MaskTool::None => t.mask_tool = tool_panels::MaskTool::None,
+            Tool::Masking if t.selected_mask.is_some() => {
+                t.selected_mask = None;
+                t.selected_comp = None;
+            }
+            Tool::RedEye if t.selected_red_eye.is_some() => t.selected_red_eye = None,
+            Tool::Edit => {}
+            _ => self.set_tool(Tool::Edit),
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        let t = &mut self.tools;
+        let (tool, spot, mask, eye) = (t.tool, t.selected_spot.take(), t.selected_mask, t.selected_red_eye.take());
+        match tool {
+            Tool::Masking => {
+                t.selected_mask = None;
+                t.selected_comp = None;
+            }
+            Tool::Remove | Tool::RedEye => {}
+            _ => return,
+        }
+        let Some(d) = self.doc_mut() else { return };
+        let s = &mut d.settings;
+        match tool {
+            Tool::Remove => {
+                if let Some(i) = spot.filter(|&i| i < s.retouch.len()) {
+                    s.retouch.remove(i);
+                }
+            }
+            Tool::Masking => {
+                if let Some(i) = mask.filter(|&i| i < s.masks.len()) {
+                    s.masks.remove(i);
+                }
+            }
+            _ => {
+                if let Some(i) = eye.filter(|&i| i < s.red_eye.len()) {
+                    s.red_eye.remove(i);
                 }
             }
         }
@@ -1079,40 +1207,43 @@ impl App {
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let has_doc = self.doc().is_some();
+        let has_clip = has_doc && self.clipboard.is_some();
+        let can_redo = self.doc().map(|d| !d.redo.is_empty()).unwrap_or(false);
+        let can_undo = self.doc().map(|d| !d.undo.is_empty()).unwrap_or(false);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Open files…  Ctrl+O").clicked() {
+                if menu_item(ui, true, "Open files…", "Ctrl+O") {
                     if let Some(files) = crate::dialogs::pick_files() {
                         self.open_paths(files);
                     }
                     ui.close();
                 }
-                if ui.button("Open folder…  Ctrl+Shift+O").clicked() {
+                if menu_item(ui, true, "Open folder…", "Ctrl+Shift+O") {
                     if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                         self.open_paths(vec![dir]);
                     }
                     ui.close();
                 }
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.open_path).hint_text("path to file or folder").desired_width(220.0));
-                    if ui.button("Open").clicked() && !self.open_path.is_empty() {
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.open_path).hint_text("path to file or folder").desired_width(220.0));
+                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if (ui.button("Open").clicked() || enter) && !self.open_path.is_empty() {
                         let p = PathBuf::from(shellexpand(&self.open_path));
                         self.open_paths(vec![p]);
                         ui.close();
                     }
                 });
                 ui.separator();
-                if ui.button("Save image…  Ctrl+S").clicked() {
+                if menu_item(ui, has_doc, "Save image…", "Ctrl+S") {
                     self.export.open = true;
                     ui.close();
                 }
-                if ui.button("Save settings (XMP sidecar)").clicked() {
-                    if let Some(d) = self.doc_mut() {
-                        d.save_sidecar();
-                    }
+                if menu_item(ui, has_doc, "Save settings (XMP sidecar)", "") {
+                    self.save_settings();
                     ui.close();
                 }
-                if ui.button("Export settings as XMP…").clicked() {
+                if menu_item(ui, has_doc, "Export settings as XMP…", "") {
                     if let Some(d) = self.doc() {
                         if let Some(p) = rfd::FileDialog::new().add_filter("XMP", &["xmp"]).set_file_name("settings.xmp").save_file() {
                             let x = darkslide_core::xmp::to_xmp(
@@ -1125,7 +1256,7 @@ impl App {
                     }
                     ui.close();
                 }
-                if ui.button("Load settings from XMP…").clicked() {
+                if menu_item(ui, has_doc, "Load settings from XMP…", "") {
                     if let Some(p) = rfd::FileDialog::new().add_filter("XMP", &["xmp"]).pick_file() {
                         if let Some(pr) = darkslide_core::xmp::load_preset(&p) {
                             if let Some(d) = self.doc_mut() {
@@ -1136,60 +1267,60 @@ impl App {
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Merge to HDR…").clicked() {
+                let n_sel = self.docs.iter().filter(|d| d.selected).count();
+                if menu_item(ui, n_sel >= 2, "Merge to HDR…", "") {
                     self.merge.open = Some(crate::dialogs::MergeKind::Hdr);
                     ui.close();
                 }
-                if ui.button("Merge to Panorama…").clicked() {
+                if menu_item(ui, n_sel >= 2, "Merge to Panorama…", "") {
                     self.merge.open = Some(crate::dialogs::MergeKind::Pano);
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Preferences…").clicked() {
+                if menu_item(ui, true, "Preferences…", "") {
                     self.show_prefs = true;
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Quit").clicked() {
+                if menu_item(ui, true, "Quit", "Ctrl+Q") {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
             ui.menu_button("Edit", |ui| {
-                if ui.button("Undo  Ctrl+Z").clicked() {
+                if menu_item(ui, can_undo, "Undo", "Ctrl+Z") {
                     if let Some(d) = self.doc_mut() {
                         d.undo();
                     }
                 }
-                if ui.button("Redo  Ctrl+Shift+Z").clicked() {
+                if menu_item(ui, can_redo, "Redo", "Ctrl+Shift+Z") {
                     if let Some(d) = self.doc_mut() {
                         d.redo();
                     }
                 }
                 ui.separator();
-                if ui.button("Copy settings  Ctrl+C").clicked() {
-                    self.copy_settings();
+                if menu_item(ui, has_doc, "Copy settings", "Ctrl+C") {
+                    self.copy_settings(None);
                     ui.close();
                 }
-                if ui.button("Copy settings (choose)…  Ctrl+Alt+C").clicked() {
-                    self.copy_settings();
+                if menu_item(ui, has_doc, "Copy settings (choose)…", "Ctrl+Alt+C") {
                     self.copy.open_for_copy();
                     ui.close();
                 }
-                if ui.button("Paste settings  Ctrl+V").clicked() {
+                if menu_item(ui, has_clip, "Paste settings", "Ctrl+V") {
                     self.paste_settings(None);
                     ui.close();
                 }
-                if ui.button("Paste settings (choose)…  Ctrl+Alt+V").clicked() {
+                if menu_item(ui, has_clip, "Paste settings (choose)…", "Ctrl+Alt+V") {
                     self.copy.open_for_paste();
                     ui.close();
                 }
-                if ui.button("Sync settings to selected…").clicked() {
-                    self.copy_settings();
+                if menu_item(ui, has_doc, "Sync settings to selected…", "") {
+                    self.copy_settings(None);
                     self.copy.open_for_paste();
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Select all").clicked() {
+                if menu_item(ui, self.docs.len() > 1, "Select all", "") {
                     for d in self.docs.iter_mut() {
                         d.selected = true;
                     }
@@ -1197,62 +1328,60 @@ impl App {
                 }
             });
             ui.menu_button("Image", |ui| {
-                if ui.button("Auto tone  Ctrl+U").clicked() {
+                if menu_item(ui, has_doc, "Auto tone", "Ctrl+U") {
                     self.pending_actions.push(Action::AutoTone);
                     ui.close();
                 }
-                if ui.button("Auto white balance  Ctrl+Shift+U").clicked() {
+                if menu_item(ui, has_doc, "Auto white balance", "Ctrl+Shift+U") {
                     self.pending_actions.push(Action::AutoWb);
                     ui.close();
                 }
-                if ui.button("Reset all settings…  Ctrl+R").clicked() {
+                if menu_item(ui, has_doc, "Reset all settings…", "Ctrl+R") {
                     self.confirm_reset = true;
                     ui.close();
                 }
-                if ui.button("Reset to open settings").clicked() {
+                if menu_item(ui, has_doc, "Reset to open settings", "") {
                     if let Some(d) = self.doc_mut() {
                         d.settings = d.opened.clone();
                     }
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Rotate 90° CW").clicked() {
+                if menu_item(ui, has_doc, "Rotate 90° CW", "") {
                     if let Some(d) = self.doc_mut() {
-                        d.settings.crop.rotate90 = (d.settings.crop.rotate90 + 1) % 4;
-                        tool_panels::reset_crop(&mut d.settings);
+                        tool_panels::rotate90(&mut d.settings, 1);
                     }
                 }
-                if ui.button("Rotate 90° CCW").clicked() {
+                if menu_item(ui, has_doc, "Rotate 90° CCW", "") {
                     if let Some(d) = self.doc_mut() {
-                        d.settings.crop.rotate90 = (d.settings.crop.rotate90 + 3) % 4;
-                        tool_panels::reset_crop(&mut d.settings);
+                        tool_panels::rotate90(&mut d.settings, 3);
                     }
                 }
-                if ui.button("Flip horizontal").clicked() {
+                if menu_item(ui, has_doc, "Flip horizontal", "") {
                     if let Some(d) = self.doc_mut() {
                         d.settings.crop.flip_h = !d.settings.crop.flip_h;
                     }
                 }
                 ui.separator();
-                if ui.button("Save new defaults for this camera").clicked() {
+                if menu_item(ui, has_doc, "Save new defaults for this camera", "") {
                     if let Some(d) = self.doc() {
                         if let Some(e) = &d.engine {
                             let r = crate::doc::save_camera_default(e, &d.settings, false);
                             self.status = match r {
                                 Ok(_) => "Saved camera defaults".into(),
-                                Err(e) => format!("Error: {e}"),
+                                Err(e) => format!("Couldn't save camera defaults: {e}"),
                             };
                         }
                     }
                     ui.close();
                 }
-                if ui.button("Reset camera defaults").clicked() {
+                if menu_item(ui, has_doc, "Reset camera defaults", "") {
                     if let Some(e) = self.doc().and_then(|d| d.engine.clone()) {
                         crate::doc::reset_camera_default(&e);
                     }
                     ui.close();
                 }
-                if ui.button("Copy after to before").clicked() {
+                if menu_item(ui, has_doc, "Copy after to before", "") {
                     if let Some(d) = self.doc_mut() {
                         d.opened = d.settings.clone();
                     }
@@ -1260,16 +1389,16 @@ impl App {
                 }
             });
             ui.menu_button("View", |ui| {
-                if ui.button("Fit  Ctrl+0").clicked() {
+                if menu_item(ui, has_doc, "Fit", "Ctrl+0") {
                     self.zoom = Zoom::Fit;
                 }
-                if ui.button("100%  Ctrl+Alt+0").clicked() {
+                if menu_item(ui, has_doc, "100%", "Ctrl+Alt+0") {
                     self.zoom = Zoom::Scale(1.0);
                 }
-                if ui.button("Zoom in  Ctrl+=").clicked() {
+                if menu_item(ui, has_doc, "Zoom in", "Ctrl+=") {
                     self.zoom_step(1);
                 }
-                if ui.button("Zoom out  Ctrl+−").clicked() {
+                if menu_item(ui, has_doc, "Zoom out", "Ctrl+−") {
                     self.zoom_step(-1);
                 }
                 ui.separator();
@@ -1286,16 +1415,22 @@ impl App {
                 if ui.checkbox(&mut self.fullscreen, "Full screen  F").changed() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
                 }
-                if ui.button("Color samplers: clear").clicked() {
+                ui.separator();
+                let mut sampling = self.pick == Pick::Sampler && self.tools.tool == Tool::Edit;
+                if ui.add_enabled(has_doc, egui::Checkbox::new(&mut sampling, "Color sampler tool")).on_hover_text("Click the photo to pin up to 9 RGB readouts").changed() {
+                    self.set_tool(Tool::Edit);
+                    self.pick = if sampling { Pick::Sampler } else { Pick::None };
+                }
+                if menu_item(ui, !self.samplers.is_empty(), "Clear color samplers", "") {
                     self.samplers.clear();
                 }
             });
             ui.menu_button("Help", |ui| {
-                if ui.button("Keyboard shortcuts").clicked() {
+                if menu_item(ui, true, "Keyboard shortcuts", "") {
                     self.show_shortcuts = true;
                     ui.close();
                 }
-                if ui.button("About").clicked() {
+                if menu_item(ui, true, "About Darkslide", "") {
                     self.show_about = true;
                     ui.close();
                 }
@@ -1312,38 +1447,40 @@ impl App {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(egui::Button::new("?").frame(false)).on_hover_text("About Darkslide").clicked() {
+                let icon = |ui: &mut egui::Ui, enabled: bool, glyph: &str, tip: &str| {
+                    ui.add_enabled(enabled, egui::Button::new(RichText::new(glyph).size(15.0)).frame(false)).on_hover_text(tip).clicked()
+                };
+                if icon(ui, true, ic::QUESTION, "About Darkslide") {
                     self.show_about = true;
                 }
-                if ui.add(egui::Button::new(RichText::new(ic::KEYBOARD).size(15.0)).frame(false)).on_hover_text("Keyboard shortcuts").clicked() {
+                if icon(ui, true, ic::KEYBOARD, "Keyboard shortcuts") {
                     self.show_shortcuts = true;
                 }
-                if ui.add(egui::Button::new("⚙").frame(false)).on_hover_text("Preferences…").clicked() {
+                if icon(ui, true, ic::GEAR_SIX, "Preferences…") {
                     self.show_prefs = true;
                 }
                 ui.separator();
-                let can_redo = self.doc().map(|d| !d.redo.is_empty()).unwrap_or(false);
-                let can_undo = self.doc().map(|d| !d.undo.is_empty()).unwrap_or(false);
-                if ui
-                    .add_enabled(can_redo, egui::Button::new(RichText::new(ic::ARROW_U_UP_RIGHT).size(15.0)).frame(false))
-                    .on_hover_text("Redo (Ctrl+Shift+Z)")
-                    .clicked()
-                {
+                if icon(ui, can_redo, ic::ARROW_U_UP_RIGHT, "Redo (Ctrl+Shift+Z)") {
                     if let Some(d) = self.doc_mut() {
                         d.redo();
                     }
                 }
-                if ui
-                    .add_enabled(can_undo, egui::Button::new(RichText::new(ic::ARROW_U_UP_LEFT).size(15.0)).frame(false))
-                    .on_hover_text("Undo (Ctrl+Z)")
-                    .clicked()
-                {
+                if icon(ui, can_undo, ic::ARROW_U_UP_LEFT, "Undo (Ctrl+Z)") {
                     if let Some(d) = self.doc_mut() {
                         d.undo();
                     }
                 }
             });
         });
+    }
+
+    /// Save the sidecar and say where it went.
+    pub fn save_settings(&mut self) {
+        if let Some(d) = self.doc_mut() {
+            d.save_sidecar();
+            let name = darkslide_core::xmp::sidecar_path(&d.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            self.status = format!("Settings saved to {name}");
+        }
     }
 
     fn toolbar_strip(&mut self, ui: &mut egui::Ui) {
@@ -1526,38 +1663,72 @@ impl App {
     }
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
+        let has_doc = self.doc().is_some();
+        // status messages fade after a few seconds
+        if self.status != self.status_seen.0 {
+            self.status_seen = (self.status.clone(), std::time::Instant::now());
+        } else if !self.status.is_empty() {
+            let left = std::time::Duration::from_secs(5).saturating_sub(self.status_seen.1.elapsed());
+            if left.is_zero() {
+                self.status.clear();
+            } else {
+                ui.ctx().request_repaint_after(left);
+            }
+        }
         ui.horizontal(|ui| {
-            let zl = match self.zoom {
-                Zoom::Fit => "Fit".to_string(),
-                Zoom::Scale(z) => format!("{:.0}%", z * 100.0),
-            };
-            egui::ComboBox::from_id_salt("zoom").selected_text(zl).width(68.0).show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.zoom, Zoom::Fit, "Fit");
-                for z in [0.25f32, 0.5, 1.0, 2.0, 4.0, 8.0] {
-                    ui.selectable_value(&mut self.zoom, Zoom::Scale(z), format!("{:.0}%", z * 100.0));
+            ui.add_enabled_ui(has_doc, |ui| {
+                let zl = match self.zoom {
+                    Zoom::Fit => "Fit".to_string(),
+                    Zoom::Scale(z) => format!("{:.0}%", z * 100.0),
+                };
+                egui::ComboBox::from_id_salt("zoom")
+                    .selected_text(zl)
+                    .width(68.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.zoom, Zoom::Fit, "Fit");
+                        for z in [0.25f32, 0.5, 1.0, 2.0, 4.0, 8.0] {
+                            ui.selectable_value(&mut self.zoom, Zoom::Scale(z), format!("{:.0}%", z * 100.0));
+                        }
+                    })
+                    .response
+                    .on_hover_text("Zoom (Z toggles Fit / 100%)");
+                let small = |ui: &mut egui::Ui, glyph: &str, tip: &str| ui.add_sized([24.0, 22.0], egui::Button::new(glyph)).on_hover_text(tip).clicked();
+                if small(ui, ic::MAGNIFYING_GLASS_MINUS, "Zoom out (Ctrl+−)") {
+                    self.zoom_step(-1);
+                }
+                if small(ui, ic::MAGNIFYING_GLASS_PLUS, "Zoom in (Ctrl+=)") {
+                    self.zoom_step(1);
+                }
+                ui.separator();
+                // fixed sizes so switching a toggle on never shifts what follows
+                let toggle = |ui: &mut egui::Ui, on: bool, text: RichText, w: f32, tip: &str| {
+                    ui.add_sized([w, 22.0], egui::Button::selectable(on, text)).on_hover_text(tip).clicked()
+                };
+                let ba_icon = match self.ba {
+                    BeforeAfter::TopBottom | BeforeAfter::SplitTopBottom => ic::SQUARE_SPLIT_VERTICAL,
+                    _ => ic::SQUARE_SPLIT_HORIZONTAL,
+                };
+                if toggle(ui, self.ba != BeforeAfter::Off, RichText::new(ba_icon).size(15.0), 28.0, &format!("{} — Q cycles the views", self.ba.label())) {
+                    self.ba = self.ba.next();
+                }
+                let single = self.ba == BeforeAfter::Off;
+                if ui
+                    .add_enabled_ui(single, |ui| toggle(ui, self.show_before, RichText::new("Before"), 58.0, "Show the photo before editing (\\ or P)"))
+                    .inner
+                {
+                    self.show_before = !self.show_before;
+                }
+                ui.separator();
+                if toggle(ui, self.clip_s, RichText::new(ic::ARROW_LINE_DOWN_LEFT).size(14.0), 28.0, "Shadow clipping warning (U)") {
+                    self.clip_s = !self.clip_s;
+                }
+                if toggle(ui, self.clip_h, RichText::new(ic::ARROW_LINE_UP_RIGHT).size(14.0), 28.0, "Highlight clipping warning (O)") {
+                    self.clip_h = !self.clip_h;
                 }
             });
-            if ui.add_sized([22.0, 20.0], egui::Button::new(ic::MINUS)).clicked() {
-                self.zoom_step(-1);
-            }
-            if ui.add_sized([22.0, 20.0], egui::Button::new("+")).clicked() {
-                self.zoom_step(1);
-            }
-            ui.separator();
-            if ui
-                .selectable_label(self.ba != BeforeAfter::Off, RichText::new(ic::SQUARE_SPLIT_HORIZONTAL).size(15.0))
-                .on_hover_text("Cycle before/after views (Q)")
-                .clicked()
-            {
-                self.ba = self.ba.next();
-            }
-            ui.selectable_label(self.show_before, "Before").on_hover_text("Toggle before (\\)").clicked().then(|| self.show_before = !self.show_before);
-            ui.separator();
-            ui.toggle_value(&mut self.clip_s, "◣").on_hover_text("Shadow clipping (U)");
-            ui.toggle_value(&mut self.clip_h, "◥").on_hover_text("Highlight clipping (O)");
             if self.pick != Pick::None {
                 ui.separator();
-                ui.label(RichText::new(format!("Tool: {:?} (Esc to cancel)", self.pick)).color(crate::widgets::ACCENT));
+                ui.label(RichText::new(format!("{} — Esc to finish", self.pick.label())).color(crate::widgets::ACCENT));
             }
             if let Some(b) = self.busy.lock().unwrap().clone() {
                 ui.spinner();
@@ -1568,29 +1739,38 @@ impl App {
             }
             for st in self.export_status.lock().unwrap().iter() {
                 if !st.done {
-                    ui.label(format!("Saving {} / {}", st.finished, st.total));
-                    ui.add(egui::ProgressBar::new(st.progress).desired_width(120.0));
+                    ui.spinner();
+                    let n = if st.total > 1 { format!(" {} of {}", st.finished + 1, st.total) } else { String::new() };
+                    ui.label(format!("Saving{n}…"));
+                    ui.add(egui::ProgressBar::new(st.progress.max(0.02)).desired_width(120.0).animate(true));
                 } else if let Some(msg) = &st.message {
-                    ui.label(RichText::new(msg).weak());
+                    if st.done_at.map(|t| t.elapsed().as_secs() < 8).unwrap_or(true) {
+                        ui.label(RichText::new(msg).weak());
+                        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+                    }
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let tool = self.tools.tool;
                 let done_btn = egui::Button::new(RichText::new("Done").strong().color(Color32::from_rgb(225, 225, 225)))
                     .fill(crate::theme::pal().button_hover)
                     .stroke(Stroke::new(1.0, crate::theme::pal().border_strong))
                     .corner_radius(3.0)
                     .min_size(vec2(72.0, 24.0));
-                if ui.add(done_btn).on_hover_text("Save settings to the XMP sidecar").clicked() {
-                    if let Some(d) = self.doc_mut() {
-                        d.save_sidecar();
+                let tip = if tool == Tool::Edit { "Save settings to the XMP sidecar" } else { "Finish this tool and save settings to the XMP sidecar" };
+                if ui.add_enabled(has_doc, done_btn).on_hover_text(tip).clicked() {
+                    if tool == Tool::Crop {
+                        self.commit_crop();
+                    } else {
+                        self.set_tool(Tool::Edit);
                     }
-                    self.status = "Settings saved".into();
+                    self.save_settings();
                 }
                 let save_btn = egui::Button::new(RichText::new("Save image…").strong().color(Color32::WHITE))
                     .fill(crate::widgets::ACCENT)
                     .corner_radius(3.0)
                     .min_size(vec2(96.0, 24.0));
-                if ui.add(save_btn).clicked() {
+                if ui.add_enabled(has_doc, save_btn).on_hover_text("Ctrl+S").clicked() {
                     self.export.open = true;
                 }
                 ui.add_space(12.0);
@@ -1606,6 +1786,15 @@ impl App {
             });
         });
     }
+}
+
+/// Menu entry with its shortcut right-aligned in a muted colour.
+fn menu_item(ui: &mut egui::Ui, enabled: bool, label: &str, shortcut: &str) -> bool {
+    let mut b = egui::Button::new(label);
+    if !shortcut.is_empty() {
+        b = b.shortcut_text(shortcut);
+    }
+    ui.add_enabled(enabled, b.min_size(vec2(220.0, 0.0))).clicked()
 }
 
 fn shellexpand(p: &str) -> String {
@@ -1626,7 +1815,20 @@ impl eframe::App for App {
         if !dropped.is_empty() {
             self.open_paths(dropped);
         }
+        // the crop the tool started with, for Esc to restore
+        if self.tools.tool != self.prev_tool {
+            self.crop_on_enter = if self.tools.tool == Tool::Crop { self.doc().map(|d| d.settings.crop) } else { None };
+            if self.prev_tool == Tool::Crop {
+                self.tools.straighten = false;
+            }
+            self.prev_tool = self.tools.tool;
+        }
         self.shortcuts(&ctx);
+        // the mask overlay is coloured when a render arrives; a new colour needs one
+        if self.tools.mask_overlay_color != self.last_overlay {
+            self.last_overlay = self.tools.mask_overlay_color;
+            self.last_fit = None;
+        }
 
         egui::Panel::top("top")
             .frame(
@@ -1706,6 +1908,41 @@ impl eframe::App for App {
         let alt = crate::widgets::take_alt_preview(&ctx);
         self.schedule(&ctx, interacting && alt.is_none(), alt);
         let _ = Vec2::ZERO;
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if ctx.text_edit_focused() {
+            return;
+        }
+        // Tab toggles the filmstrip; egui would also move focus to the menu bar
+        let mut tab = false;
+        raw.events.retain(|e| match e {
+            egui::Event::Key { key: egui::Key::Tab, pressed, modifiers, .. } if modifiers.is_none() => {
+                tab |= *pressed;
+                false
+            }
+            _ => true,
+        });
+        self.tab_pressed |= tab;
+        // egui-winit turns Ctrl+C / Ctrl+V into clipboard events; settings copy needs the keys
+        let m = ctx.input(|i| i.modifiers);
+        let mut keys = vec![];
+        raw.events.retain(|e| match e {
+            egui::Event::Copy => {
+                keys.push(egui::Key::C);
+                false
+            }
+            egui::Event::Paste(_) => {
+                keys.push(egui::Key::V);
+                false
+            }
+            _ => true,
+        });
+        for key in keys {
+            for pressed in [true, false] {
+                raw.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: m });
+            }
+        }
     }
 
     fn on_exit(&mut self) {

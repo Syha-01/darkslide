@@ -27,6 +27,8 @@ pub enum DragKind {
     SpotSource(usize),
     SpotMove(usize),
     RedEye,
+    RedEyeMove(usize),
+    RedEyeSize(usize),
     ObjectBox,
     Guide,
     Tat,
@@ -42,6 +44,8 @@ pub struct DragState {
     pub tat_value: f32,
     pub tat_last_y: f32,
     pub tat_hue: f32,
+    /// Centre and radii of the red eye box being moved or sized.
+    pub start_eye: [f32; 4],
     pub hover_rgb: Option<[u8; 3]>,
     /// Last pointer position seen during the drag (release frames have none).
     pub last: Pos2,
@@ -179,6 +183,14 @@ impl ViewMap {
 pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     let view = ui.max_rect();
     app.view_rect = view;
+    // the crop box needs the whole photo; side-by-side views have no zoom
+    if app.tools.tool == Tool::Crop || app.ba != BeforeAfter::Off {
+        app.zoom = Zoom::Fit;
+    }
+    // the centre only means something when zoomed; Fit -> 100% starts centred
+    if app.zoom == Zoom::Fit {
+        app.center = [0.5, 0.5];
+    }
     if app.doc().is_none() {
         app.start_view(ui, view);
         return;
@@ -231,7 +243,8 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
         }
         _ => {
             let img_rect = match app.zoom {
-                Zoom::Fit => fit_in(view.shrink(8.0)),
+                // room around the crop handles to grab and to rotate from
+                Zoom::Fit => fit_in(view.shrink(if crop_tool { 36.0 } else { 8.0 })),
                 Zoom::Scale(z) => {
                     let size = vec2((cw * z as f64 / ppp as f64) as f32, (ch * z as f64 / ppp as f64) as f32);
                     Rect::from_min_size(pos2(view.center().x - app.center[0] * size.x, view.center().y - app.center[1] * size.y), size)
@@ -273,8 +286,12 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
                 }
             }
         }
-        if *before && views.len() == 2 {
-            painter.text(rect.left_top() + vec2(6.0, 6.0), egui::Align2::LEFT_TOP, "Before", egui::FontId::proportional(13.0), Color32::WHITE);
+        if views.len() == 2 {
+            let label = if *before { "Before" } else { "After" };
+            let at = rect.left_top() + vec2(6.0, 6.0);
+            let r = painter.text(at, egui::Align2::LEFT_TOP, label, egui::FontId::proportional(13.0), Color32::TRANSPARENT);
+            painter.rect_filled(r.expand2(vec2(5.0, 2.0)), 3.0, Color32::from_black_alpha(150));
+            painter.text(at, egui::Align2::LEFT_TOP, label, egui::FontId::proportional(13.0), Color32::WHITE);
         }
     }
     // split views: before on one side of a divider
@@ -322,20 +339,23 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     }
 
     // zoom with the wheel around the cursor; ctrl-wheel or plain wheel
-    let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-    if resp.hovered() && scroll.abs() > 0.5 && app.ba == BeforeAfter::Off {
+    let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+    if resp.hovered() && (scroll.abs() > 0.5 || (pinch - 1.0).abs() > 1e-3) && app.ba == BeforeAfter::Off && !crop_tool {
         if let Some(hp) = resp.hover_pos() {
+            let fit_z = fit_in(view.shrink(8.0)).width() * ppp / cw as f32;
             let cur = match app.zoom {
-                Zoom::Fit => (img_rect.width() * ppp) as f64 / cw,
-                Zoom::Scale(z) => z as f64,
-            } as f32;
-            let nz = (cur * (1.0 + scroll * 0.0025)).clamp(0.02, 16.0);
+                Zoom::Fit => fit_z,
+                Zoom::Scale(z) => z,
+            };
+            // ctrl+wheel arrives as a zoom delta, the plain wheel as a scroll
+            let nz = (cur * (1.0 + scroll * 0.0025) * pinch).min(16.0);
             let c = map.to_crop(hp);
             let size = vec2((cw * nz as f64 / ppp as f64) as f32, (ch * nz as f64 / ppp as f64) as f32);
             // keep the point under the cursor fixed
             let new_min = hp - vec2(c[0] as f32 * size.x, c[1] as f32 * size.y);
             app.center = [((view.center().x - new_min.x) / size.x), ((view.center().y - new_min.y) / size.y)];
-            app.zoom = Zoom::Scale(nz);
+            // zooming out stops at Fit
+            app.zoom = if nz <= fit_z * 1.001 { Zoom::Fit } else { Zoom::Scale(nz) };
         }
     }
 
@@ -343,26 +363,25 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     let middle = ui.input(|i| i.pointer.middle_down());
     let shift = ui.input(|i| i.modifiers.shift);
     let alt = ui.input(|i| i.modifiers.alt);
+    let ctrl = ui.input(|i| i.modifiers.command);
 
     // ---------------------------------------------------------- interactions
-    if resp.double_clicked() && app.pick == Pick::None && matches!(app.tools.tool, Tool::Edit | Tool::Presets | Tool::Snapshots) {
-        if let Some(hp) = resp.interact_pointer_pos() {
-            let c = map.to_crop(hp);
-            app.zoom = if app.zoom == Zoom::Fit { Zoom::Scale(1.0) } else { Zoom::Fit };
-            app.center = [c[0] as f32, c[1] as f32];
-        }
+    // double-click inside the crop box applies it, as in Lightroom
+    if resp.double_clicked() && crop_tool && !app.tools.straighten {
+        app.commit_crop();
     }
 
     let pointer = ui.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos()));
     if resp.drag_started() {
-        app.drag.start = resp.interact_pointer_pos().or(pointer).unwrap_or_default();
+        // hit-test where the button went down, not where the drag threshold was crossed
+        app.drag.start = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()).or(pointer).unwrap_or_default();
         app.drag.last = app.drag.start;
         app.drag.start_center = app.center;
         let p = app.drag.start;
         app.drag.kind = if space || middle {
             DragKind::Pan
         } else {
-            let k = begin_tool_drag(app, &map, p, alt);
+            let k = if crop_tool && ctrl { DragKind::Straighten } else { begin_tool_drag(app, &map, p, alt) };
             if k == DragKind::Tat {
                 tat_begin(app, &map, p);
             }
@@ -380,7 +399,7 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
                 }
             }
             DragKind::None => {}
-            _ => continue_tool_drag(app, &map, p, shift),
+            _ => continue_tool_drag(app, &map, p, shift, alt),
         }
     }
     if resp.drag_stopped() {
@@ -393,11 +412,15 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
         }
         app.drag.kind = DragKind::None;
     }
-    if resp.clicked() {
+    // the second click of a double-click already did its job above
+    if resp.clicked() && !resp.double_clicked() {
         if let Some(p) = resp.interact_pointer_pos().or(pointer) {
             click(app, &map, p);
         }
     }
+
+    // the view centre always stays over the photo, so it can't be lost off screen
+    app.center = [app.center[0].clamp(0.0, 1.0), app.center[1].clamp(0.0, 1.0)];
 
     // ---------------------------------------------------------- overlays
     draw_overlays(app, &painter, &map, resp.hover_pos());
@@ -498,33 +521,20 @@ fn cursor_for(app: &App, map: &ViewMap, p: Pos2) -> Cursor {
             if let (Some(mi), Some(ci)) = (tu.selected_mask, tu.selected_comp)
                 && let Some(c) = doc.settings.masks.get(mi).and_then(|m| m.components.get(ci))
             {
-                match &c.shape {
-                    MaskShape::Linear { start, end, .. } => {
-                        let ps = map.from_t([start[0] as f64, start[1] as f64]);
-                        let pe = map.from_t([end[0] as f64, end[1] as f64]);
-                        if ps.distance(p) < 12.0 || pe.distance(p) < 12.0 {
-                            return Cursor::Icon(resize_cursor(pe - ps));
-                        }
-                        if ps.lerp(pe, 0.5).distance(p) < 12.0 {
-                            return Cursor::Icon(Move);
-                        }
-                    }
-                    MaskShape::Radial { center, radius, .. } => {
-                        let pc = map.from_t([center[0] as f64, center[1] as f64]);
-                        let pr = map.from_t([(center[0] + radius[0]) as f64, center[1] as f64]);
-                        let pb = map.from_t([center[0] as f64, (center[1] + radius[1]) as f64]);
-                        if pc.distance(p) < 12.0 {
-                            return Cursor::Icon(Move);
-                        }
-                        if pr.distance(p) < 12.0 {
-                            return Cursor::Icon(resize_cursor(pr - pc));
-                        }
-                        if pb.distance(p) < 12.0 {
-                            return Cursor::Icon(resize_cursor(pb - pc));
-                        }
-                    }
-                    _ => {}
+                let hs = gradient_handles(&c.shape, map);
+                if let Some(&(h, q)) = hs.iter().find(|(_, q)| q.distance(p) < 12.0) {
+                    let centre = hs[0].1;
+                    let linear = matches!(c.shape, MaskShape::Linear { .. });
+                    return Cursor::Icon(match (linear, h) {
+                        (true, 2) | (false, 0) => Move,
+                        (true, _) => resize_cursor(hs[1].1 - hs[0].1),
+                        (false, 5) => Alias,
+                        _ => resize_cursor(q - centre),
+                    });
                 }
+            }
+            if pin_at(app, map, p).is_some() {
+                return Cursor::Icon(PointingHand);
             }
             Cursor::Icon(match tu.mask_tool {
                 MaskTool::None if zoomed => Grab,
@@ -544,7 +554,11 @@ fn cursor_for(app: &App, map: &ViewMap, p: Pos2) -> Cursor {
             }
             Cursor::Icon(Crosshair)
         }
-        Tool::RedEye => Cursor::Icon(Crosshair),
+        Tool::RedEye => Cursor::Icon(match red_eye_at(app, map, p) {
+            Some((_, true)) => ResizeNwSe,
+            Some(_) => Move,
+            Option::None => Crosshair,
+        }),
         _ if zoomed => Cursor::Icon(Grab),
         _ => Cursor::Icon(ZoomIn),
     }
@@ -673,40 +687,16 @@ fn begin_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, alt: bool) -> DragKind
             let t = [t[0] as f32, t[1] as f32];
             let tu = &mut app.tools;
             // existing handles of the selected component first
-            if let (Some(mi), Some(ci)) = (tu.selected_mask, tu.selected_comp) {
-                if let Some(c) = doc.settings.masks.get(mi).and_then(|m| m.components.get(ci)) {
-                    match &c.shape {
-                        MaskShape::Linear { start, end, .. } => {
-                            let ps = map.from_t([start[0] as f64, start[1] as f64]);
-                            let pe = map.from_t([end[0] as f64, end[1] as f64]);
-                            if ps.distance(p) < 12.0 {
-                                return DragKind::LinearHandle(0);
-                            }
-                            if pe.distance(p) < 12.0 {
-                                return DragKind::LinearHandle(1);
-                            }
-                            if ps.lerp(pe, 0.5).distance(p) < 12.0 {
-                                return DragKind::LinearHandle(2);
-                            }
-                        }
-                        MaskShape::Radial { center, radius, .. } => {
-                            let pc = map.from_t([center[0] as f64, center[1] as f64]);
-                            let pr = map.from_t([(center[0] + radius[0]) as f64, center[1] as f64]);
-                            let pb = map.from_t([center[0] as f64, (center[1] + radius[1]) as f64]);
-                            if pc.distance(p) < 12.0 {
-                                return DragKind::RadialHandle(0);
-                            }
-                            if pr.distance(p) < 12.0 {
-                                return DragKind::RadialHandle(1);
-                            }
-                            if pb.distance(p) < 12.0 {
-                                return DragKind::RadialHandle(2);
-                            }
-                        }
-                        _ => {}
-                    }
+            if let (Some(mi), Some(ci)) = (tu.selected_mask, tu.selected_comp)
+                && let Some(c) = doc.settings.masks.get(mi).and_then(|m| m.components.get(ci))
+            {
+                let linear = matches!(c.shape, MaskShape::Linear { .. });
+                if let Some((h, _)) = gradient_handles(&c.shape, map).into_iter().find(|(_, q)| q.distance(p) < 12.0) {
+                    return if linear { DragKind::LinearHandle(h) } else { DragKind::RadialHandle(h) };
                 }
             }
+            // a placed-by-menu component (Add / Subtract / Intersect) is drawn by the next drag
+            let placing = tu.place_comp.is_some() && tu.place_comp == tu.selected_mask.zip(tu.selected_comp);
             match tu.mask_tool {
                 MaskTool::Brush => {
                     let (mi, ci) = ensure_component(doc, tu, MaskShape::Brush { strokes: vec![] }, |s| matches!(s, MaskShape::Brush { .. }));
@@ -725,13 +715,15 @@ fn begin_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, alt: bool) -> DragKind
                     DragKind::Brush
                 }
                 MaskTool::Linear => {
-                    let shape = MaskShape::Linear { start: t, end: t, two_sided: false };
-                    new_component(doc, tu, shape);
+                    if !placing {
+                        new_component(doc, tu, MaskShape::Linear { start: t, end: t, two_sided: false });
+                    }
                     DragKind::LinearNew
                 }
                 MaskTool::Radial => {
-                    let shape = MaskShape::Radial { center: t, radius: [0.001, 0.001], angle: 0.0, feather: 50.0 };
-                    new_component(doc, tu, shape);
+                    if !placing {
+                        new_component(doc, tu, MaskShape::Radial { center: t, radius: [0.001, 0.001], angle: 0.0, feather: 50.0 });
+                    }
                     DragKind::RadialNew
                 }
                 MaskTool::ObjectBox => DragKind::ObjectBox,
@@ -768,9 +760,88 @@ fn begin_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, alt: bool) -> DragKind
             app.tools.selected_spot = Some(doc.settings.retouch.len() - 1);
             DragKind::SpotNew
         }
-        Tool::RedEye => DragKind::RedEye,
+        Tool::RedEye => {
+            if let Some((i, rim)) = red_eye_at(app, map, p) {
+                app.tools.selected_red_eye = Some(i);
+                let re = &app.docs[cur].settings.red_eye[i];
+                app.drag.start_eye = [re.center[0], re.center[1], re.radius[0], re.radius[1]];
+                if rim { DragKind::RedEyeSize(i) } else { DragKind::RedEyeMove(i) }
+            } else {
+                DragKind::RedEye
+            }
+        }
         _ => DragKind::Pan,
     }
+}
+
+/// The red eye correction under `p`: (index, true when on its rim).
+fn red_eye_at(app: &App, map: &ViewMap, p: Pos2) -> Option<(usize, bool)> {
+    let d = app.doc()?;
+    let t = map.to_t(p);
+    d.settings.red_eye.iter().enumerate().rev().find_map(|(i, re)| {
+        let (dx, dy) = ((t[0] as f32 - re.center[0]) / re.radius[0].max(1e-6), (t[1] as f32 - re.center[1]) / re.radius[1].max(1e-6));
+        let r = (dx * dx + dy * dy).sqrt();
+        // a few screen pixels of rim, whatever the box size
+        let rim = 6.0 / (re.radius[0] * map.geo.ow as f32 * map.scale()).max(1.0);
+        (r < 1.0 + rim).then_some((i, r > 1.0 - rim))
+    })
+}
+
+/// Point on a radial gradient's ellipse frame: (u, v) in units of its radii.
+fn radial_pt(map: &ViewMap, center: [f32; 2], radius: [f32; 2], angle: f32, u: f32, v: f32) -> Pos2 {
+    let (sa, ca) = (angle.to_radians().sin(), angle.to_radians().cos());
+    let (x, y) = (u * radius[0], v * radius[1]);
+    map.from_t([(center[0] + x * ca - y * sa) as f64, (center[1] + x * sa + y * ca) as f64])
+}
+
+/// On-screen handles of a gradient. Linear: 0 start, 1 end, 2 middle.
+/// Radial: 0 centre, 1 right, 2 bottom, 3 left, 4 top, 5 rotate.
+fn gradient_handles(shape: &MaskShape, map: &ViewMap) -> Vec<(u8, Pos2)> {
+    match shape {
+        MaskShape::Linear { start, end, .. } => {
+            let ps = map.from_t([start[0] as f64, start[1] as f64]);
+            let pe = map.from_t([end[0] as f64, end[1] as f64]);
+            vec![(0, ps), (1, pe), (2, ps.lerp(pe, 0.5))]
+        }
+        MaskShape::Radial { center, radius, angle, .. } => {
+            let at = |u, v| radial_pt(map, *center, *radius, *angle, u, v);
+            let top = at(0.0, -1.0);
+            let c = at(0.0, 0.0);
+            let rot = top + (top - c).normalized() * 22.0;
+            vec![(0, c), (1, at(1.0, 0.0)), (2, at(0.0, 1.0)), (3, at(-1.0, 0.0)), (4, top), (5, rot)]
+        }
+        _ => vec![],
+    }
+}
+
+/// Where a mask's pin sits (T frame), for masks that have a place.
+fn mask_anchor(m: &MaskGroup) -> Option<[f32; 2]> {
+    match &m.components.first()?.shape {
+        MaskShape::Linear { start, end, .. } => Some([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0]),
+        MaskShape::Radial { center, .. } => Some(*center),
+        MaskShape::Brush { strokes } => strokes.first().and_then(|s| s.points.first().copied()),
+        _ => None,
+    }
+}
+
+/// The mask whose pin is under `p`, other than the selected one.
+fn pin_at(app: &App, map: &ViewMap, p: Pos2) -> Option<usize> {
+    let d = app.doc()?;
+    d.settings.masks.iter().enumerate().find_map(|(i, m)| {
+        let a = mask_anchor(m)?;
+        (Some(i) != app.tools.selected_mask && map.from_t([a[0] as f64, a[1] as f64]).distance(p) < 10.0).then_some(i)
+    })
+}
+
+/// Select a mask and arm only what editing it needs (the brush for a brush mask).
+pub fn select_mask(tu: &mut crate::tool_panels::ToolUi, s: &DevelopSettings, mi: usize) {
+    tu.selected_mask = Some(mi);
+    tu.selected_comp = Some(0);
+    tu.place_comp = None;
+    tu.mask_tool = match s.masks.get(mi).and_then(|m| m.components.first()).map(|c| &c.shape) {
+        Some(MaskShape::Brush { .. }) => MaskTool::Brush,
+        _ => MaskTool::None,
+    };
 }
 
 fn ensure_component(doc: &mut crate::doc::Doc, tu: &mut crate::tool_panels::ToolUi, shape: MaskShape, is: impl Fn(&MaskShape) -> bool) -> (usize, usize) {
@@ -807,7 +878,7 @@ fn new_component(doc: &mut crate::doc::Doc, tu: &mut crate::tool_panels::ToolUi,
     }
 }
 
-fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
+fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool, alt: bool) {
     let kind = app.drag.kind;
     let start = app.drag.start;
     let pick = app.pick;
@@ -817,6 +888,7 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
     let angle_ref = app.drag.start_angle_ref;
     let tat_value = app.drag.tat_value;
     let tat_hue = app.drag.tat_hue;
+    let eye0 = app.drag.start_eye;
     let dy_tat = p.y - app.drag.tat_last_y;
     let Some(doc) = app.doc_mut() else { return };
     let Some(engine) = doc.engine.clone() else { return };
@@ -833,8 +905,8 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
             match kind {
                 DragKind::CropMove => {
                     let (w, h) = (c.right - c.left, c.bottom - c.top);
-                    c.left = (c.left + dx).clamp(0.0, 1.0 - w);
-                    c.top = (c.top + dy).clamp(0.0, 1.0 - h);
+                    c.left = (c.left + dx).clamp(0.0, (1.0 - w).max(0.0));
+                    c.top = (c.top + dy).clamp(0.0, (1.0 - h).max(0.0));
                     c.right = c.left + w;
                     c.bottom = c.top + h;
                     if c.angle != 0.0 {
@@ -868,6 +940,29 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
                         5 => c.right += dx,
                         6 => c.bottom += dy,
                         _ => c.left += dx,
+                    }
+                    // alt resizes about the centre
+                    if alt {
+                        let (sx, sy) = match h {
+                            0 => (-1.0, -1.0),
+                            1 => (1.0, -1.0),
+                            2 => (1.0, 1.0),
+                            3 => (-1.0, 1.0),
+                            4 => (0.0, -1.0),
+                            5 => (1.0, 0.0),
+                            6 => (0.0, 1.0),
+                            _ => (-1.0, 0.0),
+                        };
+                        if sx > 0.0 {
+                            c.left -= dx;
+                        } else if sx < 0.0 {
+                            c.right -= dx;
+                        }
+                        if sy > 0.0 {
+                            c.top -= dy;
+                        } else if sy < 0.0 {
+                            c.bottom -= dy;
+                        }
                     }
                     if !c.expand {
                         c.left = c.left.max(0.0);
@@ -922,6 +1017,39 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
                                 c.bottom = c.top + nh / oh;
                             }
                         }
+                        // the ratio step can push past the photo again: shrink around the anchor until it fits
+                        if !c.expand {
+                            let (ax, ay) = match h {
+                                0 => (c.right, c.bottom),
+                                1 => (c.left, c.bottom),
+                                3 => (c.right, c.top),
+                                4 => ((c.left + c.right) / 2.0, c.bottom),
+                                6 => ((c.left + c.right) / 2.0, c.top),
+                                5 => (c.left, (c.top + c.bottom) / 2.0),
+                                7 => (c.right, (c.top + c.bottom) / 2.0),
+                                _ => (c.left, c.top),
+                            };
+                            let mut k = 1.0f32;
+                            if c.left < 0.0 {
+                                k = k.min(ax / (ax - c.left));
+                            }
+                            if c.right > 1.0 {
+                                k = k.min((1.0 - ax) / (c.right - ax));
+                            }
+                            if c.top < 0.0 {
+                                k = k.min(ay / (ay - c.top));
+                            }
+                            if c.bottom > 1.0 {
+                                k = k.min((1.0 - ay) / (c.bottom - ay));
+                            }
+                            let k = k.max(0.0);
+                            if k < 1.0 {
+                                c.left = ax + (c.left - ax) * k;
+                                c.right = ax + (c.right - ax) * k;
+                                c.top = ay + (c.top - ay) * k;
+                                c.bottom = ay + (c.bottom - ay) * k;
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -946,8 +1074,23 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
             let c = corners[0].lerp(corners[2], 0.5);
             let ang = (p.y - c.y).atan2(p.x - c.x).to_degrees();
             // the photo turns with the pointer (the box stays upright)
+            // fit from the box the drag started with, so turning back grows it again
+            s.crop = start_crop;
             s.crop.angle = (start_crop.angle - (ang - angle_ref)).clamp(-45.0, 45.0);
             tool_panels::fit_crop_inside(s, &engine);
+        }
+        DragKind::RedEyeMove(i) | DragKind::RedEyeSize(i) => {
+            let st = map.to_t(start);
+            if let Some(re) = s.red_eye.get_mut(i) {
+                if matches!(kind, DragKind::RedEyeMove(_)) {
+                    re.center = [eye0[0] + (t[0] - st[0]) as f32, eye0[1] + (t[1] - st[1]) as f32];
+                } else {
+                    // scale about the centre, keeping the box's shape
+                    let d = |q: [f64; 2]| (((q[0] as f32 - eye0[0]) * map.geo.ow as f32).powi(2) + ((q[1] as f32 - eye0[1]) * map.geo.oh as f32).powi(2)).sqrt();
+                    let k = (d(t) / d(st).max(1e-3)).clamp(0.05, 20.0);
+                    re.radius = [(eye0[2] * k).max(0.002), (eye0[3] * k).max(0.002)];
+                }
+            }
         }
         DragKind::Brush => {
             if let (Some(mi), Some(ci)) = (sel_mask, sel_comp) {
@@ -991,8 +1134,22 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
                             }
                         }
                         (MaskShape::Radial { center, .. }, DragKind::RadialHandle(0)) => *center = tf,
-                        (MaskShape::Radial { center, radius, .. }, DragKind::RadialHandle(1)) => radius[0] = (tf[0] - center[0]).abs().max(0.002),
-                        (MaskShape::Radial { center, radius, .. }, DragKind::RadialHandle(_)) => radius[1] = (tf[1] - center[1]).abs().max(0.002),
+                        (MaskShape::Radial { center, angle, .. }, DragKind::RadialHandle(5)) => {
+                            // the rotate handle sits above the top
+                            let d = [tf[0] - center[0], tf[1] - center[1]];
+                            *angle = d[1].atan2(d[0]).to_degrees() + 90.0;
+                        }
+                        (MaskShape::Radial { center, radius, angle, .. }, DragKind::RadialHandle(h)) => {
+                            // size along the gradient's own (turned) axes
+                            let (sa, ca) = (angle.to_radians().sin(), angle.to_radians().cos());
+                            let d = [tf[0] - center[0], tf[1] - center[1]];
+                            let (lx, ly) = (d[0] * ca + d[1] * sa, -d[0] * sa + d[1] * ca);
+                            if h % 2 == 1 {
+                                radius[0] = lx.abs().max(0.002);
+                            } else {
+                                radius[1] = ly.abs().max(0.002);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1094,6 +1251,15 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
 
 fn end_tool_drag(app: &mut App, map: &ViewMap, p: Pos2) {
     let kind = app.drag.kind;
+    // once drawn, a gradient is edited by its handles; the next drag doesn't make another
+    if matches!(kind, DragKind::LinearNew | DragKind::RadialNew) {
+        app.tools.mask_tool = MaskTool::None;
+        app.tools.place_comp = None;
+    }
+    // a new mask folds the create grid away so its sliders are in view
+    if matches!(kind, DragKind::LinearNew | DragKind::RadialNew | DragKind::Brush | DragKind::ObjectBox) {
+        app.tools.show_create = false;
+    }
     let start = app.drag.start;
     let pet = app.tools.pet_eye;
     let Some(doc) = app.doc_mut() else { return };
@@ -1140,6 +1306,7 @@ fn end_tool_drag(app: &mut App, map: &ViewMap, p: Pos2) {
             let r = [((p.x - start.x).abs() as f64 / 2.0 / sc / map.geo.ow) as f32, ((p.y - start.y).abs() as f64 / 2.0 / sc / map.geo.oh) as f32];
             if r[0] > 0.002 && r[1] > 0.002 {
                 s.red_eye.push(RedEyeSpot { center: c, radius: r, pupil_size: 50.0, darken: 50.0, pet, catchlight: pet });
+                app.tools.selected_red_eye = Some(s.red_eye.len() - 1);
             }
         }
         DragKind::ObjectBox => {
@@ -1187,6 +1354,19 @@ fn click(app: &mut App, map: &ViewMap, p: Pos2) {
         let pp = darkslide_core::color::mul_mv(&darkslide_core::color::to_prophoto(darkslide_core::color::ColorSpace::SRgb), lin);
         darkslide_core::color::lab_to_lch(darkslide_core::color::Oklab::new().from_prophoto(pp))
     });
+    if tool == Tool::RedEye {
+        app.tools.selected_red_eye = red_eye_at(app, map, p).map(|(i, _)| i);
+        return;
+    }
+    if tool == Tool::Masking && pick == Pick::None {
+        if let Some(i) = pin_at(app, map, p) {
+            if let Some(d) = app.docs.get(app.current.unwrap_or(0)) {
+                let s = d.settings.clone();
+                select_mask(&mut app.tools, &s, i);
+            }
+            return;
+        }
+    }
     match pick {
         Pick::WhiteBalance => {
             if let Some(doc) = app.doc_mut() {
@@ -1232,6 +1412,11 @@ fn click(app: &mut App, map: &ViewMap, p: Pos2) {
             }
         }
         Pick::TatCurve | Pick::TatMixer(_) => {}
+        _ if matches!(tool, Tool::Edit | Tool::Presets | Tool::Snapshots) => {
+            // a click toggles Fit / 100% around the clicked point
+            app.zoom = if app.zoom == Zoom::Fit { Zoom::Scale(1.0) } else { Zoom::Fit };
+            app.center = [c[0] as f32, c[1] as f32];
+        }
         _ => {
             if tool == Tool::Remove {
                 // a click without drag already created a spot in begin_tool_drag? clicks don't start drags
@@ -1306,7 +1491,7 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
             // dim everything outside the (upright) crop box
             let cr = Rect::from_points(&corners);
             let o = painter.clip_rect();
-            let dim = Color32::from_black_alpha(150);
+            let dim = Color32::from_black_alpha(185);
             for r in [
                 Rect::from_min_max(o.min, pos2(o.max.x, cr.min.y)),
                 Rect::from_min_max(pos2(o.min.x, cr.max.y), o.max),
@@ -1354,8 +1539,12 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                     painter.line_segment([lerp2(1.0, 0.0), lerp2(0.0, 1.0)], thin);
                 }
                 CropOverlay::Triangle => {
+                    // the diagonal plus perpendiculars to it from the other two corners
+                    let (w, h) = (corners[0].distance(corners[1]), corners[0].distance(corners[3]));
+                    let (a, b) = (w * w / (w * w + h * h), h * h / (w * w + h * h));
                     painter.line_segment([lerp2(0.0, 0.0), lerp2(1.0, 1.0)], thin);
-                    painter.line_segment([lerp2(1.0, 0.0), lerp2(0.3, 0.7)], thin);
+                    painter.line_segment([lerp2(1.0, 0.0), lerp2(a, a)], thin);
+                    painter.line_segment([lerp2(0.0, 1.0), lerp2(1.0 - b, 1.0 - b)], thin);
                 }
                 CropOverlay::None => {}
             }
@@ -1364,19 +1553,33 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                 let m = c.lerp(corners[(i + 1) % 4], 0.5);
                 painter.rect_filled(Rect::from_center_size(m, Vec2::splat(7.0)), 1.0, Color32::WHITE);
             }
+            let label = |at: Pos2, align: egui::Align2, text: String| {
+                let font = egui::FontId::proportional(12.0);
+                let r = painter.text(at, align, &text, font.clone(), Color32::TRANSPARENT);
+                painter.rect_filled(r.expand2(vec2(5.0, 2.0)), 3.0, Color32::from_black_alpha(170));
+                painter.text(at, align, text, font, Color32::WHITE);
+            };
             if app.drag.kind == DragKind::Straighten {
                 if let Some(h) = hover {
                     painter.line_segment([app.drag.start, h], Stroke::new(1.5, Color32::YELLOW));
+                    let (ta, tb) = (map.to_t(app.drag.start), map.to_t(h));
+                    let mut a = ((tb[1] - ta[1]) * map.geo.oh).atan2((tb[0] - ta[0]) * map.geo.ow).to_degrees();
+                    if a > 90.0 {
+                        a -= 180.0;
+                    } else if a < -90.0 {
+                        a += 180.0;
+                    }
+                    if a.abs() > 45.0 {
+                        a = if a > 0.0 { a - 90.0 } else { a + 90.0 };
+                    }
+                    label(h + vec2(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{a:.2}°"));
                 }
             }
             let (cw, ch) = map.geo.crop_size();
-            painter.text(
-                corners[2] + vec2(-4.0, 6.0),
-                egui::Align2::RIGHT_TOP,
-                format!("{:.0} × {:.0}  {:.2}°", cw, ch, s.crop.angle),
-                egui::FontId::proportional(12.0),
-                Color32::WHITE,
-            );
+            // below the box, or inside it when the box reaches the bottom of the canvas
+            let below = corners[2].y + 24.0 < painter.clip_rect().max.y;
+            let (at, align) = if below { (corners[2] + vec2(-2.0, 6.0), egui::Align2::RIGHT_TOP) } else { (corners[2] + vec2(-8.0, -8.0), egui::Align2::RIGHT_BOTTOM) };
+            label(at, align, format!("{:.0} × {:.0}  {:.2}°", cw, ch, s.crop.angle));
         }
         Tool::Masking => {
             if let (Some(mi), Some(ci)) = (app.tools.selected_mask, app.tools.selected_comp) {
@@ -1400,30 +1603,51 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                                 painter.circle_stroke(pt, 5.0, Stroke::new(1.0, Color32::WHITE));
                             }
                         }
-                        MaskShape::Radial { center, radius, angle, .. } => {
-                            let pts: Vec<Pos2> = (0..=64)
-                                .map(|i| {
-                                    let a = i as f32 / 64.0 * std::f32::consts::TAU;
-                                    let (sa, ca) = (angle.to_radians().sin(), angle.to_radians().cos());
-                                    let (x, y) = (a.cos() * radius[0], a.sin() * radius[1]);
-                                    map.from_t([(center[0] + x * ca - y * sa) as f64, (center[1] + x * sa + y * ca) as f64])
-                                })
-                                .collect();
-                            painter.add(egui::Shape::line(pts, Stroke::new(1.5, Color32::WHITE)));
-                            for (i, pt) in [
-                                map.from_t([center[0] as f64, center[1] as f64]),
-                                map.from_t([(center[0] + radius[0]) as f64, center[1] as f64]),
-                                map.from_t([center[0] as f64, (center[1] + radius[1]) as f64]),
-                            ]
-                            .iter()
-                            .enumerate()
-                            {
-                                painter.circle_filled(*pt, if i == 0 { 6.0 } else { 4.5 }, crate::widgets::ACCENT);
-                                painter.circle_stroke(*pt, 5.0, Stroke::new(1.0, Color32::WHITE));
+                        MaskShape::Radial { center, radius, angle, feather } => {
+                            let ring = |k: f32| -> Vec<Pos2> {
+                                (0..=72)
+                                    .map(|i| {
+                                        let a = i as f32 / 72.0 * std::f32::consts::TAU;
+                                        radial_pt(map, *center, *radius, *angle, a.cos() * k, a.sin() * k)
+                                    })
+                                    .collect()
+                            };
+                            painter.add(egui::Shape::line(ring(1.0), Stroke::new(1.5, Color32::WHITE)));
+                            // where the feathering starts
+                            let f = (feather / 100.0).clamp(0.0, 1.0);
+                            if f > 0.02 {
+                                let inner = ring(1.0 - f);
+                                for seg in inner.chunks(2) {
+                                    if let [a, b] = seg {
+                                        painter.line_segment([*a, *b], Stroke::new(1.0, Color32::from_white_alpha(150)));
+                                    }
+                                }
+                            }
+                            let hs = gradient_handles(&c.shape, map);
+                            painter.line_segment([hs[4].1, hs[5].1], Stroke::new(1.0, Color32::from_white_alpha(150)));
+                            for (h, pt) in hs {
+                                let r = match h {
+                                    0 => 6.0,
+                                    5 => 4.0,
+                                    _ => 4.5,
+                                };
+                                painter.circle_filled(pt, r, if h == 5 { Color32::WHITE } else { crate::widgets::ACCENT });
+                                painter.circle_stroke(pt, r, Stroke::new(1.0, Color32::WHITE));
                             }
                         }
                         _ => {}
                     }
+                }
+            }
+            // a pin for every other mask that has a place, to pick it on the photo
+            for (i, m) in s.masks.iter().enumerate() {
+                if Some(i) == app.tools.selected_mask {
+                    continue;
+                }
+                if let Some(a) = mask_anchor(m) {
+                    let pt = map.from_t([a[0] as f64, a[1] as f64]);
+                    painter.circle_filled(pt, 5.5, Color32::from_gray(40));
+                    painter.circle_stroke(pt, 5.5, Stroke::new(1.5, Color32::WHITE));
                 }
             }
             if app.tools.mask_tool == MaskTool::Brush {
@@ -1431,6 +1655,13 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                     let r = app.tools.brush.size * map.long_edge() * map.scale();
                     painter.circle_stroke(h, r, Stroke::new(1.0, Color32::WHITE));
                     painter.circle_stroke(h, r * (1.0 - app.tools.brush.feather / 100.0), Stroke::new(1.0, Color32::from_white_alpha(100)));
+                    // erasing shows a minus in the ring
+                    if app.tools.brush.erase || painter.ctx().input(|i| i.modifiers.alt) {
+                        painter.line_segment([h - vec2(5.0, 0.0), h + vec2(5.0, 0.0)], Stroke::new(1.5, Color32::WHITE));
+                    } else {
+                        painter.line_segment([h - vec2(4.0, 0.0), h + vec2(4.0, 0.0)], Stroke::new(1.0, Color32::from_white_alpha(160)));
+                        painter.line_segment([h - vec2(0.0, 4.0), h + vec2(0.0, 4.0)], Stroke::new(1.0, Color32::from_white_alpha(160)));
+                    }
                 }
             }
         }
@@ -1464,14 +1695,18 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
             }
         }
         Tool::RedEye => {
-            for re in &s.red_eye {
+            for (i, re) in s.red_eye.iter().enumerate() {
+                let sel = app.tools.selected_red_eye == Some(i);
                 let pts: Vec<Pos2> = (0..=48)
                     .map(|i| {
                         let a = i as f32 / 48.0 * std::f32::consts::TAU;
                         map.from_t([(re.center[0] + a.cos() * re.radius[0]) as f64, (re.center[1] + a.sin() * re.radius[1]) as f64])
                     })
                     .collect();
-                painter.add(egui::Shape::line(pts, Stroke::new(1.2, Color32::WHITE)));
+                if sel {
+                    painter.add(egui::Shape::line(pts.clone(), Stroke::new(3.0, Color32::from_black_alpha(120))));
+                }
+                painter.add(egui::Shape::line(pts, Stroke::new(if sel { 2.0 } else { 1.2 }, if sel { crate::widgets::ACCENT } else { Color32::WHITE })));
             }
             if app.drag.kind == DragKind::RedEye || app.drag.kind == DragKind::ObjectBox {
                 if let Some(h) = hover {

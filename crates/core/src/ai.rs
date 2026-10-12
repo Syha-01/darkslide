@@ -25,10 +25,20 @@ fn analysis_view(engine: &Engine, s: &DevelopSettings) -> Image3 {
 
 /// `hint` is an optional T-frame box [x0, y0, x1, y1] around the object.
 pub fn detect(engine: &Engine, s: &DevelopSettings, kind: AiMaskKind, hint: Option<[f32; 4]>) -> Plane {
+    detect_with_source(engine, s, kind, hint).0
+}
+
+/// Like `detect`, also saying whether an installed model did it (false: the
+/// built-in colour and texture estimate).
+pub fn detect_with_source(engine: &Engine, s: &DevelopSettings, kind: AiMaskKind, hint: Option<[f32; 4]>) -> (Plane, bool) {
     let img = analysis_view(engine, s);
     if let Some(p) = learned(&img, kind, hint) {
-        return p;
+        return (p, true);
     }
+    (estimate(&img, kind, hint), false)
+}
+
+fn estimate(img: &Image3, kind: AiMaskKind, hint: Option<[f32; 4]>) -> Plane {
     let ok = Oklab::new();
     let lab: Vec<[f32; 3]> = img.data.par_iter().map(|p| ok.from_prophoto(*p)).collect();
     let (w, h) = (img.w, img.h);

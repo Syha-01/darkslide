@@ -224,7 +224,9 @@ pub fn output_sharpen(img: &mut Image3, mode: SharpenFor, amt: SharpenAmount) {
 pub fn expand_name(tpl: &str, src: &Path, seq: u32, meta: &crate::decode::Metadata) -> String {
     let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "image".into());
     let date = meta.date.as_deref().map(|d| d.split(' ').next().unwrap_or("").replace(':', "")).unwrap_or_default();
-    tpl.replace("{name}", &stem).replace("{seq}", &format!("{seq:04}")).replace("{date}", &date).replace("{camera}", &meta.model.replace(' ', "_"))
+    let out = tpl.replace("{name}", &stem).replace("{seq}", &format!("{seq:04}")).replace("{date}", &date).replace("{camera}", &meta.model.replace(' ', "_"));
+    // an empty template would write a hidden ".jpg"
+    if out.trim().is_empty() { stem } else { out.trim().to_string() }
 }
 
 /// Encode and write. Returns the written path.

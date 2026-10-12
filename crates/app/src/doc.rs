@@ -145,6 +145,27 @@ impl Doc {
         }
     }
 
+    /// A finished AI detection fills its mask everywhere in history, so the
+    /// fill isn't an undo step of its own and undo never lands on an
+    /// undetected mask (which would detect again).
+    pub fn fill_ai_raster(&mut self, mi: usize, kind: darkslide_core::params::AiMaskKind, raster: &str) {
+        let fill = |s: &mut DevelopSettings| {
+            if let Some(m) = s.masks.get_mut(mi) {
+                for c in m.components.iter_mut() {
+                    if let darkslide_core::params::MaskShape::Ai { kind: k, raster: r @ None, .. } = &mut c.shape
+                        && *k == kind
+                    {
+                        *r = Some(raster.to_string());
+                        break;
+                    }
+                }
+            }
+        };
+        fill(&mut self.settings);
+        fill(&mut self.committed);
+        self.undo.iter_mut().chain(self.redo.iter_mut()).for_each(fill);
+    }
+
     pub fn undo(&mut self) {
         if let Some(prev) = self.undo.pop() {
             self.redo.push(std::mem::replace(&mut self.settings, prev));

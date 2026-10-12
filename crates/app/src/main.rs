@@ -26,6 +26,10 @@ fn main() -> anyhow::Result<()> {
         return screenshot::run(args);
     }
     #[cfg(feature = "screenshot")]
+    if args.first().map(|a| a == "--script").unwrap_or(false) {
+        return screenshot::script(args);
+    }
+    #[cfg(feature = "screenshot")]
     if args.first().map(|a| a == "--smoke").unwrap_or(false) {
         return screenshot::smoke(args);
     }
