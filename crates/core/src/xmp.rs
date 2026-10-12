@@ -510,6 +510,21 @@ pub fn write_sidecar_full(image: &Path, s: &DevelopSettings, is_raw: bool, ratin
     Ok(())
 }
 
+/// A sidecar with only a rating and label, for photos not opened yet.
+pub fn write_meta_sidecar(image: &Path, rating: i32, label: Option<String>) -> Result<()> {
+    let mut x = String::from("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Darkslide\">\n <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
+    x.push_str(&format!("  <rdf:Description rdf:about=\"\"\n    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n    xmp:Rating=\"{rating}\""));
+    if let Some(l) = label {
+        x.push_str(&format!("\n    xmp:Label=\"{}\"", esc(&l)));
+    }
+    x.push_str("/>\n </rdf:RDF>\n</x:xmpmeta>\n");
+    let p = sidecar_path(image);
+    let tmp = p.with_extension("xmp.tmp");
+    std::fs::write(&tmp, x)?;
+    std::fs::rename(&tmp, &p)?;
+    Ok(())
+}
+
 /// Load settings from a sidecar if present. Prefers our full JSON, falls back
 /// to crs values (e.g. sidecars written by Camera Raw / Lightroom).
 pub fn read_sidecar(image: &Path, is_raw: bool) -> Option<(DevelopSettings, ParsedXmp)> {
@@ -651,6 +666,18 @@ pub fn sanitize(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meta_sidecar_has_no_settings() {
+        let dir = std::env::temp_dir().join(format!("ds_meta_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = dir.join("a.nef");
+        write_meta_sidecar(&img, 4, Some("Red".into())).unwrap();
+        let (_, p) = read_sidecar(&img, true).unwrap();
+        assert_eq!((p.rating, p.label.as_deref()), (Some(4), Some("Red")));
+        assert!(p.ds_json.is_none() && p.crs.is_empty() && p.masks.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn roundtrip_crs_and_json() {

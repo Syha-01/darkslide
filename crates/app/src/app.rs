@@ -1077,18 +1077,35 @@ impl App {
         let keys = [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
         for (n, k) in keys.iter().enumerate() {
             if pressed(*k) {
-                if let Some(d) = self.doc_mut() {
-                    if n <= 5 {
-                        d.rating = n as i32;
-                        d.rejected = false;
-                    } else {
-                        let l = [ColorLabel::Red, ColorLabel::Yellow, ColorLabel::Green, ColorLabel::Blue][n - 6];
-                        d.label = if d.label == l { ColorLabel::None } else { l };
-                    }
-                    d.dirty = true;
-                    d.last_change = Some(std::time::Instant::now());
+                if n <= 5 {
+                    self.set_rating(n as i32);
+                } else {
+                    self.toggle_label([ColorLabel::Red, ColorLabel::Yellow, ColorLabel::Green, ColorLabel::Blue][n - 6]);
                 }
             }
+        }
+    }
+
+    /// Rating and label changes go to every selected photo shown in the strip, as in Lightroom.
+    fn meta_targets(&self) -> Vec<usize> {
+        let sel: Vec<usize> = self.visible_indices().into_iter().filter(|&i| self.docs[i].selected).collect();
+        if sel.is_empty() { self.current.into_iter().collect() } else { sel }
+    }
+
+    pub fn set_rating(&mut self, r: i32) {
+        for i in self.meta_targets() {
+            let d = &mut self.docs[i];
+            d.set_meta(crate::doc::Meta { rating: r, rejected: false, ..d.meta() });
+        }
+    }
+
+    /// Sets the label, or clears it when every target already has it.
+    pub fn toggle_label(&mut self, l: ColorLabel) {
+        let targets = self.meta_targets();
+        let all = targets.iter().all(|&i| self.docs[i].label == l);
+        for i in targets {
+            let d = &mut self.docs[i];
+            d.set_meta(crate::doc::Meta { label: if all { ColorLabel::None } else { l }, ..d.meta() });
         }
     }
 
@@ -1211,6 +1228,33 @@ impl App {
         self.select(visible[n]);
     }
 
+    /// Select what the filter shows; hidden photos stay out of sync and paste.
+    pub fn select_all_visible(&mut self) {
+        let v = self.visible_indices();
+        for (i, d) in self.docs.iter_mut().enumerate() {
+            d.selected = v.contains(&i);
+        }
+    }
+
+    pub fn remove_doc(&mut self, i: usize) {
+        if self.docs[i].dirty && self.prefs.autosave_sidecars {
+            self.docs[i].save_sidecar();
+        }
+        self.docs.remove(i);
+        match self.current {
+            Some(c) if c > i => self.current = Some(c - 1),
+            Some(c) if c == i => {
+                self.current = None;
+                self.fit_tex = None;
+                self.hist = None;
+                if !self.docs.is_empty() {
+                    self.select(i.min(self.docs.len() - 1));
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn visible_indices(&self) -> Vec<usize> {
         self.docs
             .iter()
@@ -1235,8 +1279,8 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let has_doc = self.doc().is_some();
         let has_clip = has_doc && self.clipboard.is_some();
-        let can_redo = self.doc().map(|d| !d.redo.is_empty()).unwrap_or(false);
-        let can_undo = self.doc().map(|d| !d.undo.is_empty()).unwrap_or(false);
+        let can_redo = self.doc().map(|d| d.can_redo()).unwrap_or(false);
+        let can_undo = self.doc().map(|d| d.can_undo()).unwrap_or(false);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if menu_item(ui, true, "Open files…", "Ctrl+O") {
@@ -1347,9 +1391,7 @@ impl App {
                 }
                 ui.separator();
                 if menu_item(ui, self.docs.len() > 1, "Select all", "") {
-                    for d in self.docs.iter_mut() {
-                        d.selected = true;
-                    }
+                    self.select_all_visible();
                     ui.close();
                 }
             });

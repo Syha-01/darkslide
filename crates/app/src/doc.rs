@@ -68,11 +68,28 @@ pub struct Doc {
     pub thumb: Option<egui::TextureHandle>,
     pub thumb_requested: bool,
     pub selected: bool,
+    /// Settings came from a loaded engine at least once (they stay after unloading).
+    pub loaded: bool,
+    pub raw: bool,
+    /// Rating or label set before the photo was loaded, kept over the sidecar's.
+    pub meta_pending: bool,
+    /// Rating/label history, each entry tagged with the settings undo depth
+    /// it happened at, so one Ctrl+Z order covers both.
+    pub meta_undo: Vec<(usize, Meta)>,
+    pub meta_redo: Vec<(usize, Meta)>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Meta {
+    pub rating: i32,
+    pub rejected: bool,
+    pub label: ColorLabel,
 }
 
 impl Doc {
     pub fn new(id: u64, path: PathBuf) -> Self {
         let s = DevelopSettings::default();
+        let path_for_raw = path.clone();
         Self {
             id,
             path,
@@ -92,6 +109,11 @@ impl Doc {
             thumb: None,
             thumb_requested: false,
             selected: false,
+            loaded: false,
+            raw: !darkslide_core::decode::is_raster(&path_for_raw),
+            meta_pending: false,
+            meta_undo: vec![],
+            meta_redo: vec![],
         }
     }
 
@@ -110,14 +132,15 @@ impl Doc {
         if let Some(def) = load_camera_default(&engine) {
             s = def;
         }
-        if let Some((side, parsed)) = xmp::read_sidecar(&self.path, is_raw) {
+        let pending = self.meta();
+        let side = xmp::read_sidecar(&self.path, is_raw);
+        // a sidecar holding only a rating or label doesn't replace camera or embedded settings
+        let meta_only = side.as_ref().is_some_and(|(_, p)| p.ds_json.is_none() && p.crs.is_empty() && p.masks.is_empty());
+        if let Some((side, parsed)) = side.filter(|_| !meta_only) {
             s = side;
             self.rating = parsed.rating.unwrap_or(0);
             self.rejected = self.rating < 0;
             self.label = parsed.label.as_deref().map(ColorLabel::from_name).unwrap_or_default();
-            if let Some(json) = parsed.ds_json.as_ref() {
-                let _ = json;
-            }
         } else if let Some(parsed) = engine.source.embedded_xmp.as_deref().map(xmp::parse).filter(|p| p.ds_json.is_some() || !p.crs.is_empty()) {
             // settings embedded in the file (e.g. a DNG saved with settings)
             s = xmp::settings_from_parsed(&parsed, is_raw);
@@ -125,6 +148,17 @@ impl Doc {
         } else if let Some(r) = engine.source.meta.rating {
             self.rating = r as i32;
         }
+        if meta_only && let Some((_, parsed)) = xmp::read_sidecar(&self.path, is_raw) {
+            self.rating = parsed.rating.unwrap_or(0);
+            self.rejected = self.rating < 0;
+            self.label = parsed.label.as_deref().map(ColorLabel::from_name).unwrap_or_default();
+        }
+        if std::mem::take(&mut self.meta_pending) {
+            self.set_meta_raw(pending);
+            self.dirty = true;
+        }
+        self.loaded = true;
+        self.raw = is_raw;
         self.snapshots = load_snapshots(&self.path);
         self.settings = s.clone();
         self.opened = s.clone();
@@ -140,6 +174,7 @@ impl Doc {
                 self.undo.remove(0);
             }
             self.redo.clear();
+            self.meta_redo.clear();
             self.dirty = true;
             self.last_change = Some(Instant::now());
         }
@@ -166,7 +201,45 @@ impl Doc {
         self.undo.iter_mut().chain(self.redo.iter_mut()).for_each(fill);
     }
 
+    pub fn meta(&self) -> Meta {
+        Meta { rating: self.rating, rejected: self.rejected, label: self.label }
+    }
+
+    fn set_meta_raw(&mut self, m: Meta) {
+        (self.rating, self.rejected, self.label) = (m.rating, m.rejected, m.label);
+    }
+
+    /// Change rating/label as an undoable step.
+    pub fn set_meta(&mut self, m: Meta) {
+        if m == self.meta() {
+            return;
+        }
+        self.meta_undo.push((self.undo.len(), self.meta()));
+        self.meta_redo.clear();
+        self.redo.clear();
+        self.set_meta_raw(m);
+        self.meta_pending |= !self.loaded;
+        self.dirty = true;
+        self.last_change = Some(Instant::now());
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty() || !self.meta_undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty() || !self.meta_redo.is_empty()
+    }
+
     pub fn undo(&mut self) {
+        if self.meta_undo.last().is_some_and(|(n, _)| *n == self.undo.len()) {
+            let (n, m) = self.meta_undo.pop().unwrap();
+            self.meta_redo.push((n, self.meta()));
+            self.set_meta_raw(m);
+            self.dirty = true;
+            self.last_change = Some(Instant::now());
+            return;
+        }
         if let Some(prev) = self.undo.pop() {
             self.redo.push(std::mem::replace(&mut self.settings, prev));
             self.committed = self.settings.clone();
@@ -176,6 +249,14 @@ impl Doc {
     }
 
     pub fn redo(&mut self) {
+        if self.meta_redo.last().is_some_and(|(n, _)| *n == self.undo.len()) {
+            let (n, m) = self.meta_redo.pop().unwrap();
+            self.meta_undo.push((n, self.meta()));
+            self.set_meta_raw(m);
+            self.dirty = true;
+            self.last_change = Some(Instant::now());
+            return;
+        }
         if let Some(next) = self.redo.pop() {
             self.undo.push(std::mem::replace(&mut self.settings, next));
             self.committed = self.settings.clone();
@@ -185,15 +266,23 @@ impl Doc {
     }
 
     pub fn save_sidecar(&mut self) {
-        if self.engine.is_none() {
-            return;
-        }
         let label = self.label.name().map(|s| s.to_string());
         let rating = if self.rejected { -1 } else { self.rating };
-        if let Err(e) = xmp::write_sidecar_full(&self.path, &self.settings, self.is_raw(), Some(rating), label) {
+        let r = if self.loaded {
+            save_snapshots(&self.path, &self.snapshots);
+            xmp::write_sidecar_full(&self.path, &self.settings, self.raw, Some(rating), label)
+        } else {
+            // never loaded: only the rating and label are known
+            match xmp::read_sidecar(&self.path, self.raw) {
+                None => xmp::write_meta_sidecar(&self.path, rating, label),
+                Some((s, parsed)) if parsed.ds_json.is_some() => xmp::write_sidecar_full(&self.path, &s, self.raw, Some(rating), label),
+                // a foreign sidecar we'd rewrite lossily: the rating waits for the photo to load
+                Some(_) => Ok(()),
+            }
+        };
+        if let Err(e) = r {
             log::warn!("writing sidecar for {}: {e}", self.path.display());
         }
-        save_snapshots(&self.path, &self.snapshots);
         self.dirty = false;
     }
 }
