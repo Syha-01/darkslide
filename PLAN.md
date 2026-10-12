@@ -376,7 +376,8 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] Merge to Panorama (features, homography, spherical/cylindrical/
       perspective, blending, auto crop / fill edges, boundary warp)
 - [x] HDR editing mode + HDR export (EXR, float TIFF, gain-map JPEG)
-- [x] AVIF output (SDR, 10-bit, pure-Rust ravif; feature `avif`, default on) — JPEG XL [ ]
+- [x] AVIF output (SDR, 10-bit, pure-Rust ravif; feature `avif`, default on)
+- [x] JPEG XL output (lossless 8/16-bit sRGB, pure-Rust zune-jpegxl; feature `jxl`)
 
 ### Phase 10 — Performance & polish
 - [ ] wgpu compute pipeline for interactive stages
@@ -536,5 +537,5 @@ Session 1, later still:
 
 Known gaps / next:
 - Auto CA estimate is crude; lensfun DB not bundled (needs download).
-- HDR export formats (AVIF/JXL/gain map), merge HDR/pano, denoise AI,
+- HDR AVIF/JXL (PQ/HLG), lossy JXL, merge HDR/pano, denoise AI,
   super resolution, lens blur, AI masks: not yet.

@@ -28,6 +28,8 @@ pub enum Format {
     Psd,
     /// AVIF (sRGB, 10-bit).
     Avif,
+    /// JPEG XL (sRGB, lossless, 8 or 16-bit).
+    Jxl,
     /// DNG of the original raw data; settings go to a sidecar.
     Dng,
 }
@@ -41,6 +43,7 @@ impl Format {
             Self::Exr => "exr",
             Self::Psd => "psd",
             Self::Avif => "avif",
+            Self::Jxl => "jxl",
             Self::Dng => "dng",
         }
     }
@@ -327,6 +330,7 @@ pub fn save(engine: &Engine, s: &DevelopSettings, ex: &ExportSettings, seq: u32,
         Format::Tiff => write_tiff(&path, &enc, ex, &icc).context("writing TIFF")?,
         Format::Psd => write_psd(&path, &enc, ex, &icc)?,
         Format::Avif => write_avif(&path, &img, ex, meta.as_deref())?,
+        Format::Jxl => write_jxl(&path, &img, ex)?,
         Format::Dng => unreachable!(),
         Format::Exr => {
             let buf = image::Rgb32FImage::from_raw(ow as u32, oh as u32, enc.data.iter().flat_map(|p| *p).collect()).unwrap();
@@ -488,7 +492,62 @@ fn write_avif(path: &Path, img: &Image3, ex: &ExportSettings, exif: Option<&[u8]
     Ok(())
 }
 
+/// Lossless JPEG XL. The encoder only signals sRGB, so convert like AVIF.
+#[cfg(feature = "jxl")]
+fn write_jxl(path: &Path, img: &Image3, ex: &ExportSettings) -> Result<()> {
+    use zune_core::bit_depth::BitDepth;
+    use zune_core::colorspace::ColorSpace as ZSpace;
+    use zune_core::options::EncoderOptions;
+    let srgb = to_output(img, ColorSpace::SRgb, false);
+    let (bytes, depth) = if ex.bit_depth >= 16 {
+        (quantize16(&srgb).iter().flat_map(|v| v.to_ne_bytes()).collect::<Vec<u8>>(), BitDepth::Sixteen)
+    } else {
+        (quantize8(&srgb), BitDepth::Eight)
+    };
+    let opts = EncoderOptions::new(srgb.w, srgb.h, ZSpace::RGB, depth).set_num_threads(rayon::current_num_threads().min(255) as u8);
+    let mut out = vec![];
+    zune_jpegxl::JxlSimpleEncoder::new(&bytes, opts).encode(&mut out).map_err(|e| anyhow::anyhow!("JPEG XL: {e:?}"))?;
+    std::fs::write(path, out)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "jxl"))]
+fn write_jxl(_path: &Path, _img: &Image3, _ex: &ExportSettings) -> Result<()> {
+    anyhow::bail!("built without JPEG XL support")
+}
+
 #[cfg(not(feature = "avif"))]
 fn write_avif(_path: &Path, _img: &Image3, _ex: &ExportSettings, _exif: Option<&[u8]>) -> Result<()> {
     anyhow::bail!("built without AVIF support")
+}
+
+#[cfg(all(test, feature = "jxl"))]
+mod jxl_tests {
+    use super::*;
+
+    #[test]
+    fn jxl_round_trips() {
+        let img = Image3::from_fn(37, 21, |x, y| [x as f32 / 36.0, y as f32 / 20.0, 0.3]);
+        let want = to_output(&img, ColorSpace::SRgb, false);
+        let dir = std::env::temp_dir().join(format!("ds_jxl_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for bits in [8u8, 16] {
+            let p = dir.join(format!("t{bits}.jxl"));
+            write_jxl(&p, &img, &ExportSettings { bit_depth: bits, ..Default::default() }).unwrap();
+            let dec = jxl_oxide::JxlImage::builder().open(&p).unwrap();
+            assert_eq!((dec.width(), dec.height()), (37, 21));
+            let fr = dec.render_frame(0).unwrap();
+            let buf = fr.image_all_channels();
+            let px = buf.buf();
+            // 8-bit is dithered by up to one code value
+            let tol = if bits >= 16 { 1e-4 } else { 1.0 / 255.0 };
+            for (i, p) in want.data.iter().enumerate() {
+                for c in 0..3 {
+                    let v = p[c].clamp(0.0, 1.0);
+                    assert!((px[i * 3 + c] - v).abs() <= tol, "{bits}-bit px {i} c{c}: {} vs {v}", px[i * 3 + c]);
+                }
+            }
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

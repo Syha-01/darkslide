@@ -111,6 +111,7 @@ fn export_window(app: &mut App, ctx: &egui::Context) {
                 ui.selectable_value(&mut ex.format, Format::Exr, "OpenEXR (HDR, linear)");
                 ui.selectable_value(&mut ex.format, Format::Psd, "Photoshop (PSD)");
                 ui.selectable_value(&mut ex.format, Format::Avif, "AVIF");
+                ui.selectable_value(&mut ex.format, Format::Jxl, "JPEG XL (lossless)");
                 ui.selectable_value(&mut ex.format, Format::Dng, "DNG (original raw + settings)");
             });
             ui.end_row();
@@ -146,6 +147,15 @@ fn export_window(app: &mut App, ctx: &egui::Context) {
                 Format::Avif => {
                     ui.label("Quality");
                     ui.add(egui::Slider::new(&mut ex.jpeg_quality, 1..=100));
+                    ui.end_row();
+                }
+                Format::Jxl => {
+                    ui.label("Bit depth");
+                    ui.horizontal(|ui| {
+                        for b in [8u8, 16] {
+                            ui.selectable_value(&mut ex.bit_depth, b, format!("{b}-bit"));
+                        }
+                    });
                     ui.end_row();
                 }
                 Format::Psd => {

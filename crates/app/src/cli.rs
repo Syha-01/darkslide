@@ -58,6 +58,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     "exr" => Format::Exr,
                     "psd" => Format::Psd,
                     "avif" => Format::Avif,
+                    "jxl" => Format::Jxl,
                     "dng" => Format::Dng,
                     f => bail!("unknown format {f}"),
                 }
