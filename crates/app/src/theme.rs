@@ -1,4 +1,4 @@
-//! Dark theme close to Camera Raw's.
+//! Camera Raw's grey themes.
 
 use eframe::egui::{self, Color32, CornerRadius, Stroke};
 
@@ -27,59 +27,152 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-pub fn apply(ctx: &egui::Context) {
-    install_fonts(ctx);
-    let mut v = egui::Visuals::dark();
-    v.override_text_color = Some(Color32::from_rgb(222, 222, 222));
-    v.panel_fill = Color32::from_rgb(32, 32, 32); // Adobe panel #202020
-    v.window_fill = Color32::from_rgb(24, 24, 24); // Dialog windows #181818
-    v.extreme_bg_color = Color32::from_rgb(16, 16, 16); // Sunken wells, inputs #101010
-    v.faint_bg_color = Color32::from_rgb(22, 22, 22);
+/// Interface greys. The two variants follow Photoshop's Dark (default) and
+/// Darkest themes, which Camera Raw inherits.
+pub struct Palette {
+    /// Behind the image.
+    pub canvas: Color32,
+    /// Side panel and section headers.
+    pub panel: Color32,
+    /// Top/bottom bars and the tool strip.
+    pub bar: Color32,
+    pub filmstrip: Color32,
+    /// Sunken areas: histogram, curve, value boxes.
+    pub well: Color32,
+    pub input: Color32,
+    pub input_hover: Color32,
+    pub button: Color32,
+    pub button_hover: Color32,
+    pub header_hover: Color32,
+    pub divider: Color32,
+    pub border: Color32,
+    pub border_strong: Color32,
+    pub track: Color32,
+    pub notch: Color32,
+    pub grid: Color32,
+    pub text: Color32,
+    pub text_dim: Color32,
+    pub text_muted: Color32,
+}
 
-    // Adobe Blue selection (#1473e6)
-    v.selection.bg_fill = Color32::from_rgb(20, 115, 230);
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+const fn g(v: u8) -> Color32 {
+    Color32::from_rgb(v, v, v)
+}
 
-    // Inactive buttons / controls
-    v.widgets.inactive.bg_fill = Color32::from_rgb(42, 42, 42);
-    v.widgets.inactive.weak_bg_fill = Color32::from_rgb(34, 34, 34);
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 52));
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(215, 215, 215));
+pub const DARK: Palette = Palette {
+    canvas: g(40),
+    panel: g(83),
+    bar: g(83),
+    filmstrip: g(62),
+    well: g(50),
+    input: g(68),
+    input_hover: g(76),
+    button: g(72),
+    button_hover: g(96),
+    header_hover: g(92),
+    divider: g(56),
+    border: g(100),
+    border_strong: g(120),
+    track: g(140),
+    notch: g(175),
+    grid: g(70),
+    text: g(235),
+    text_dim: g(200),
+    text_muted: g(165),
+};
 
-    // Hovered controls
-    v.widgets.hovered.bg_fill = Color32::from_rgb(54, 54, 54);
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(44, 44, 44);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(72, 72, 72));
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+pub const DARKEST: Palette = Palette {
+    canvas: g(30),
+    panel: g(50),
+    bar: g(50),
+    filmstrip: g(40),
+    well: g(34),
+    input: g(40),
+    input_hover: g(48),
+    button: g(62),
+    button_hover: g(80),
+    header_hover: g(60),
+    divider: g(38),
+    border: g(70),
+    border_strong: g(90),
+    track: g(105),
+    notch: g(140),
+    grid: g(52),
+    text: g(225),
+    text_dim: g(185),
+    text_muted: g(135),
+};
 
-    // Active / pressed controls
-    v.widgets.active.bg_fill = Color32::from_rgb(66, 66, 66);
-    v.widgets.active.weak_bg_fill = Color32::from_rgb(54, 54, 54);
-    v.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_rgb(20, 115, 230));
-    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+static THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
-    // Non-interactive containers
-    v.widgets.noninteractive.bg_fill = Color32::from_rgb(32, 32, 32);
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(42, 42, 42));
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(165, 165, 165));
+pub const NAMES: [&str; 2] = ["Dark (Camera Raw default)", "Darkest"];
 
-    // Open popups / menus
-    v.widgets.open.bg_fill = Color32::from_rgb(38, 38, 38);
-    v.widgets.open.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
-
-    v.window_corner_radius = CornerRadius::same(4);
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(48, 48, 48));
-    v.menu_corner_radius = CornerRadius::same(3);
-
-    for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.noninteractive, &mut v.widgets.open] {
-        w.corner_radius = CornerRadius::same(3);
+pub fn pal() -> &'static Palette {
+    match THEME.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => &DARKEST,
+        _ => &DARK,
     }
+}
 
-    ctx.set_visuals(v);
+/// Switch palettes and restyle.
+pub fn set(ctx: &egui::Context, theme: u8) {
+    THEME.store(theme.min(1), std::sync::atomic::Ordering::Relaxed);
+    visuals(ctx);
+}
+
+pub fn apply(ctx: &egui::Context, theme: u8) {
+    install_fonts(ctx);
+    set(ctx, theme);
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(6.0, 5.0);
         s.spacing.button_padding = egui::vec2(8.0, 3.5);
         s.spacing.menu_margin = egui::Margin::symmetric(4, 4);
         s.spacing.slider_width = 150.0;
     });
+}
+
+fn visuals(ctx: &egui::Context) {
+    let p = pal();
+    let mut v = egui::Visuals::dark();
+    v.override_text_color = Some(p.text);
+    v.panel_fill = p.panel;
+    v.window_fill = p.panel;
+    v.extreme_bg_color = p.input;
+    v.faint_bg_color = p.well;
+    v.text_edit_bg_color = Some(p.input);
+
+    // Adobe Blue selection (#1473e6)
+    v.selection.bg_fill = Color32::from_rgb(20, 115, 230);
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+
+    v.widgets.inactive.bg_fill = p.button;
+    v.widgets.inactive.weak_bg_fill = p.button;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, p.border);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, p.text_dim);
+
+    v.widgets.hovered.bg_fill = p.button_hover;
+    v.widgets.hovered.weak_bg_fill = p.button_hover;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, p.border_strong);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+
+    v.widgets.active.bg_fill = p.button_hover;
+    v.widgets.active.weak_bg_fill = p.button_hover;
+    v.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_rgb(20, 115, 230));
+    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+
+    v.widgets.noninteractive.bg_fill = p.panel;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.divider);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.text_dim);
+
+    v.widgets.open.bg_fill = p.input;
+    v.widgets.open.bg_stroke = Stroke::new(1.0, p.border);
+
+    v.window_corner_radius = CornerRadius::same(4);
+    v.window_stroke = Stroke::new(1.0, p.divider);
+    v.menu_corner_radius = CornerRadius::same(3);
+
+    for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.noninteractive, &mut v.widgets.open] {
+        w.corner_radius = CornerRadius::same(3);
+    }
+    ctx.set_visuals(v);
 }

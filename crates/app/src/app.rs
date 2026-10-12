@@ -136,8 +136,8 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext, paths: Vec<PathBuf>) -> Self {
         let ctx = cc.egui_ctx.clone();
-        crate::theme::apply(&ctx);
         let prefs = Prefs::load();
+        crate::theme::apply(&ctx, prefs.theme);
         let mut app = Self {
             docs: vec![],
             current: None,
@@ -447,7 +447,7 @@ impl App {
         } else if resp.hovered() {
             (Color32::from_white_alpha(5), Color32::from_gray(120))
         } else {
-            (Color32::TRANSPARENT, Color32::from_gray(80))
+            (Color32::TRANSPARENT, crate::theme::pal().border_strong)
         };
         p.rect_filled(zone, 10.0, fill);
         let corners = [zone.left_top(), zone.right_top(), zone.right_bottom(), zone.left_bottom(), zone.left_top()];
@@ -1346,10 +1346,10 @@ impl App {
                 let p = ui.painter_at(rect);
 
                 if sel {
-                    p.rect_filled(rect, 4.0, Color32::from_rgb(48, 48, 48));
+                    p.rect_filled(rect, 4.0, crate::theme::pal().button_hover);
                     p.rect_filled(Rect::from_min_size(pos2(rect.left(), rect.top() + 7.0), vec2(2.5, 22.0)), 1.0, crate::widgets::ACCENT);
                 } else if resp.hovered() {
-                    p.rect_filled(rect, 4.0, Color32::from_rgb(38, 38, 38));
+                    p.rect_filled(rect, 4.0, crate::theme::pal().button);
                 }
 
                 let icon_col = if sel {
@@ -1357,7 +1357,7 @@ impl App {
                 } else if resp.hovered() {
                     Color32::from_rgb(225, 225, 225)
                 } else {
-                    Color32::from_rgb(145, 145, 145)
+                    Color32::from_rgb(200, 200, 200)
                 };
 
                 crate::widgets::draw_tool_icon(&p, t, rect.center(), 22.0, icon_col);
@@ -1374,13 +1374,13 @@ impl App {
             let w = ui.available_width();
             ui.painter().line_segment(
                 [pos2(ui.cursor().left() + 6.0, sep_y), pos2(ui.cursor().left() + w - 6.0, sep_y)],
-                Stroke::new(1.0, Color32::from_rgb(44, 44, 44)),
+                Stroke::new(1.0, crate::theme::pal().divider),
             );
             ui.add_space(8.0);
 
             let (s_rect, s_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
             if s_resp.hovered() {
-                ui.painter().rect_filled(s_rect, 4.0, Color32::from_rgb(38, 38, 38));
+                ui.painter().rect_filled(s_rect, 4.0, crate::theme::pal().button);
             }
             let s_col = if s_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
             ui.painter().text(s_rect.center(), egui::Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(16.0), s_col);
@@ -1391,7 +1391,7 @@ impl App {
             ui.add_space(4.0);
             let (f_rect, f_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
             if f_resp.hovered() {
-                ui.painter().rect_filled(f_rect, 4.0, Color32::from_rgb(38, 38, 38));
+                ui.painter().rect_filled(f_rect, 4.0, crate::theme::pal().button);
             }
             let f_col = if f_resp.hovered() || self.fullscreen { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
             ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, "⛶", egui::FontId::proportional(16.0), f_col);
@@ -1417,7 +1417,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(e.source.meta.exposure_summary()).size(11.0).color(Color32::from_rgb(175, 175, 175)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{} ms", self.render_ms)).size(10.0).color(Color32::from_rgb(110, 110, 110)))
+                        ui.label(RichText::new(format!("{} ms", self.render_ms)).size(10.0).color(crate::theme::pal().text_muted))
                             .on_hover_text("Last preview render time");
                     });
                 });
@@ -1562,8 +1562,8 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let done_btn = egui::Button::new(RichText::new("Done").strong().color(Color32::from_rgb(225, 225, 225)))
-                    .fill(Color32::from_rgb(48, 48, 48))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(66, 66, 66)))
+                    .fill(crate::theme::pal().button_hover)
+                    .stroke(Stroke::new(1.0, crate::theme::pal().border_strong))
                     .corner_radius(3.0)
                     .min_size(vec2(72.0, 24.0));
                 if ui.add(done_btn).on_hover_text("Save settings to the XMP sidecar").clicked() {
@@ -1581,7 +1581,11 @@ impl App {
                 }
                 ui.add_space(12.0);
                 if let Some(text) = self.workflow_text() {
-                    if ui.link(RichText::new(text).small().color(crate::widgets::ACCENT)).on_hover_text("Output settings (Save image)").clicked() {
+                    if ui
+                        .link(RichText::new(text).size(11.5).underline().color(crate::theme::pal().text_dim))
+                        .on_hover_text("Output settings (Save image)")
+                        .clicked()
+                    {
                         self.export.open = true;
                     }
                 }
@@ -1613,8 +1617,8 @@ impl eframe::App for App {
         egui::Panel::top("top")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(26, 26, 26))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .fill(crate::theme::pal().bar)
+                    .stroke(Stroke::new(1.0, crate::theme::pal().divider))
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| self.top_bar(ui));
@@ -1622,8 +1626,8 @@ impl eframe::App for App {
         egui::Panel::bottom("bottom")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(26, 26, 26))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .fill(crate::theme::pal().bar)
+                    .stroke(Stroke::new(1.0, crate::theme::pal().divider))
                     .inner_margin(egui::Margin::symmetric(12, 6)),
             )
             .show(ui, |ui| self.bottom_bar(ui));
@@ -1634,8 +1638,8 @@ impl eframe::App for App {
                 .default_size(118.0)
                 .frame(
                     egui::Frame::new()
-                        .fill(Color32::from_rgb(26, 26, 26))
-                        .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                        .fill(crate::theme::pal().filmstrip)
+                        .stroke(Stroke::new(1.0, crate::theme::pal().divider))
                         .inner_margin(egui::Margin::symmetric(10, 6)),
                 )
                 .show(ui, |ui| crate::filmstrip::filmstrip(self, ui));
@@ -1648,8 +1652,8 @@ impl eframe::App for App {
             .size_range(44.0..=44.0)
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(24, 24, 24))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .fill(crate::theme::pal().bar)
+                    .stroke(Stroke::new(1.0, crate::theme::pal().divider))
                     .inner_margin(egui::Margin::symmetric(4, 6)),
             )
             .show(ui, |ui| self.toolbar_strip(ui));
@@ -1659,7 +1663,7 @@ impl eframe::App for App {
             .resizable(true)
             .default_size(325.0)
             .size_range(280.0..=560.0)
-            .frame(egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40))).inner_margin(egui::Margin {
+            .frame(egui::Frame::new().fill(crate::theme::pal().panel).stroke(Stroke::new(1.0, crate::theme::pal().divider)).inner_margin(egui::Margin {
                 left: 8,
                 right: 8,
                 top: 8,
@@ -1668,7 +1672,7 @@ impl eframe::App for App {
             .show(ui, |ui| self.right_panel(ui));
 
         // Central image canvas
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(18, 18, 18)).inner_margin(egui::Margin::same(4))).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(crate::theme::pal().canvas).inner_margin(egui::Margin::same(4))).show(ui, |ui| {
             crate::viewer::viewer(self, ui);
         });
 

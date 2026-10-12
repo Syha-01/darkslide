@@ -32,11 +32,13 @@ pub struct Prefs {
     pub show_vectorscope: bool,
     pub export: ExportSettings,
     pub ui_scale: f32,
+    /// Index into theme::NAMES.
+    pub theme: u8,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { autosave_sidecars: true, show_vectorscope: false, export: ExportSettings::default(), ui_scale: 1.0 }
+        Self { autosave_sidecars: true, show_vectorscope: false, export: ExportSettings::default(), ui_scale: 1.0, theme: 0 }
     }
 }
 
@@ -555,6 +557,18 @@ fn prefs_window(app: &mut App, ctx: &egui::Context) {
             ui.label("Interface scale");
             if ui.add(egui::Slider::new(&mut app.prefs.ui_scale, 0.75..=2.0).step_by(0.05)).changed() {
                 ctx.set_zoom_factor(app.prefs.ui_scale);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Theme");
+            let before = app.prefs.theme;
+            egui::ComboBox::from_id_salt("theme").selected_text(crate::theme::NAMES[app.prefs.theme.min(1) as usize]).show_ui(ui, |ui| {
+                for (i, n) in crate::theme::NAMES.iter().enumerate() {
+                    ui.selectable_value(&mut app.prefs.theme, i as u8, *n);
+                }
+            });
+            if app.prefs.theme != before {
+                crate::theme::set(ctx, app.prefs.theme);
             }
         });
         ui.separator();

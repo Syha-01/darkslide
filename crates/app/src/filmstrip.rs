@@ -51,11 +51,11 @@ pub fn filmstrip(app: &mut App, ui: &mut egui::Ui) {
                     rect,
                     3.0,
                     if current {
-                        Color32::from_rgb(48, 48, 48)
+                        crate::theme::pal().button_hover
                     } else if d.selected {
-                        Color32::from_rgb(40, 40, 40)
+                        crate::theme::pal().divider
                     } else {
-                        Color32::from_rgb(24, 24, 24)
+                        crate::theme::pal().bar
                     },
                 );
                 let inner = rect.shrink2(vec2(4.0, 14.0)).translate(vec2(0.0, -4.0));
@@ -84,7 +84,7 @@ pub fn filmstrip(app: &mut App, ui: &mut egui::Ui) {
                 if current {
                     p.rect_stroke(rect, 3.0, Stroke::new(1.5, crate::widgets::ACCENT), StrokeKind::Inside);
                 } else {
-                    p.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(42, 42, 42)), StrokeKind::Inside);
+                    p.rect_stroke(rect, 3.0, Stroke::new(1.0, crate::theme::pal().divider), StrokeKind::Inside);
                 }
                 let resp = resp.on_hover_text(d.name());
                 if resp.clicked() {

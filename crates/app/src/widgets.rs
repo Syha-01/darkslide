@@ -181,11 +181,11 @@ pub fn eyedropper_button(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool
         painter.rect_filled(rect, 3.0, ACCENT);
         painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(50, 140, 245)), egui::StrokeKind::Inside);
     } else if resp.hovered() {
-        painter.rect_filled(rect, 3.0, Color32::from_rgb(48, 48, 48));
-        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(68, 68, 68)), egui::StrokeKind::Inside);
+        painter.rect_filled(rect, 3.0, crate::theme::pal().button_hover);
+        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, crate::theme::pal().border_strong), egui::StrokeKind::Inside);
     } else {
-        painter.rect_filled(rect, 3.0, Color32::from_rgb(34, 34, 34));
-        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(48, 48, 48)), egui::StrokeKind::Inside);
+        painter.rect_filled(rect, 3.0, crate::theme::pal().panel);
+        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, crate::theme::pal().button_hover), egui::StrokeKind::Inside);
     }
     let icon_col = if active {
         Color32::WHITE
@@ -293,6 +293,15 @@ pub fn take_alt_preview(ctx: &egui::Context) -> Option<AltPreview> {
 /// Camera Raw slider: label and boxed value on one line, track underneath.
 /// Returns true if changed.
 pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
+    // compact rows like ACR: no gap between the label line and the track
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        slider_rows(ui, value, spec)
+    })
+    .inner
+}
+
+fn slider_rows(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     let mut changed = false;
     let total_w = ui.available_width();
 
@@ -320,14 +329,14 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             let r = ui
                 .scope(|ui| {
                     let w = ui.visuals_mut();
-                    w.widgets.inactive.bg_fill = Color32::from_rgb(18, 18, 18);
-                    w.widgets.inactive.weak_bg_fill = Color32::from_rgb(18, 18, 18);
-                    w.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 52));
-                    w.widgets.hovered.bg_fill = Color32::from_rgb(26, 26, 26);
-                    w.widgets.hovered.weak_bg_fill = Color32::from_rgb(26, 26, 26);
-                    w.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(72, 72, 72));
+                    w.widgets.inactive.bg_fill = crate::theme::pal().input;
+                    w.widgets.inactive.weak_bg_fill = crate::theme::pal().input;
+                    w.widgets.inactive.bg_stroke = Stroke::new(1.0, crate::theme::pal().border);
+                    w.widgets.hovered.bg_fill = crate::theme::pal().input_hover;
+                    w.widgets.hovered.weak_bg_fill = crate::theme::pal().input_hover;
+                    w.widgets.hovered.bg_stroke = Stroke::new(1.0, crate::theme::pal().border_strong);
                     w.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-                    ui.add_sized([50.0, 18.0], dv)
+                    ui.add_sized([50.0, 17.0], dv)
                 })
                 .inner;
             if r.dragged() {
@@ -341,7 +350,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     });
 
     // 2. track (auto id, so sliders sharing a label never share drag state)
-    let (rect, resp) = ui.allocate_exact_size(vec2(total_w, 14.0), Sense::click_and_drag());
+    let (rect, resp) = ui.allocate_exact_size(vec2(total_w, 13.0), Sense::click_and_drag());
     let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 12.0, 3.0));
     let painter = ui.painter_at(rect.expand(2.0));
     match spec.gradient {
@@ -361,11 +370,11 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             painter.add(egui::Shape::mesh(mesh));
         }
         _ => {
-            painter.rect_filled(track, 1.5, Color32::from_rgb(70, 70, 70));
+            painter.rect_filled(track, 1.5, crate::theme::pal().track);
             if spec.min < spec.default && spec.max > spec.default {
                 // centre notch for bipolar sliders
                 let cx = track.left() + track.width() * to_t(&spec, spec.default);
-                painter.line_segment([pos2(cx, track.top() - 2.0), pos2(cx, track.bottom() + 2.0)], Stroke::new(1.0, Color32::from_rgb(95, 95, 95)));
+                painter.line_segment([pos2(cx, track.top() - 2.0), pos2(cx, track.bottom() + 2.0)], Stroke::new(1.0, crate::theme::pal().notch));
             }
         }
     }
@@ -404,7 +413,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             }
         }
     }
-    ui.add_space(3.0);
+    ui.add_space(1.0);
     changed
 }
 
@@ -452,13 +461,13 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
     let painter = ui.painter_at(header_rect);
 
     if header_resp.hovered() {
-        painter.rect_filled(header_rect, 2.0, Color32::from_rgb(40, 40, 40));
+        painter.rect_filled(header_rect, 2.0, crate::theme::pal().header_hover);
     } else {
-        painter.rect_filled(header_rect, 0.0, Color32::from_rgb(32, 32, 32));
+        painter.rect_filled(header_rect, 0.0, crate::theme::pal().panel);
     }
     painter.line_segment(
         [pos2(header_rect.left(), header_rect.bottom()), pos2(header_rect.right(), header_rect.bottom())],
-        Stroke::new(1.0, Color32::from_rgb(42, 42, 42)),
+        Stroke::new(1.0, crate::theme::pal().divider),
     );
 
     let arrow = if open { "▾" } else { "▸" };
@@ -479,9 +488,9 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
         let eye_rect = Rect::from_center_size(pos2(header_rect.right() - 15.0, header_rect.center().y), vec2(20.0, 20.0));
         let eye_resp = ui.interact(eye_rect, id.with("eye"), Sense::click());
         if eye_resp.hovered() {
-            painter.rect_filled(eye_rect, 2.0, Color32::from_rgb(52, 52, 52));
+            painter.rect_filled(eye_rect, 2.0, crate::theme::pal().border);
         }
-        let eye_col = if *en { if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) } } else { Color32::from_rgb(90, 90, 90) };
+        let eye_col = if *en { if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) } } else { crate::theme::pal().text_muted };
         draw_eyeball(&painter, eye_rect.center(), 14.0, *en, eye_col);
         if eye_resp.on_hover_text("Toggle section on/off").clicked() {
             *en = !*en;
@@ -523,22 +532,22 @@ pub fn curve_editor(ui: &mut egui::Ui, ce: CurveEdit, overlay_luts: &[(&darkslid
     let size = ui.available_width().min(300.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(28));
+    painter.rect_filled(rect, 0.0, crate::theme::pal().well);
     if let Some(h) = ce.hist {
         let max = h.iter().skip(1).take(254).copied().max().unwrap_or(1).max(1) as f32;
         for (i, &v) in h.iter().enumerate() {
             let x = rect.left() + rect.width() * i as f32 / 255.0;
             let hh = (v as f32 / max).sqrt().min(1.0) * rect.height() * 0.9;
-            painter.line_segment([pos2(x, rect.bottom()), pos2(x, rect.bottom() - hh)], Stroke::new(rect.width() / 256.0 + 0.5, Color32::from_gray(60)));
+            painter.line_segment([pos2(x, rect.bottom()), pos2(x, rect.bottom() - hh)], Stroke::new(rect.width() / 256.0 + 0.5, crate::theme::pal().grid));
         }
     }
     for i in 1..4 {
         let f = i as f32 / 4.0;
-        let g = Stroke::new(1.0, Color32::from_gray(55));
+        let g = Stroke::new(1.0, crate::theme::pal().grid);
         painter.line_segment([pos2(rect.left() + rect.width() * f, rect.top()), pos2(rect.left() + rect.width() * f, rect.bottom())], g);
         painter.line_segment([pos2(rect.left(), rect.top() + rect.height() * f), pos2(rect.right(), rect.top() + rect.height() * f)], g);
     }
-    painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, Color32::from_gray(70)));
+    painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, crate::theme::pal().track));
     let to_screen = |p: [f32; 2]| pos2(rect.left() + p[0] / 255.0 * rect.width(), rect.bottom() - p[1] / 255.0 * rect.height());
     let from_screen =
         |p: Pos2| [((p.x - rect.left()) / rect.width() * 255.0).clamp(0.0, 255.0), ((rect.bottom() - p.y) / rect.height() * 255.0).clamp(0.0, 255.0)];
@@ -695,7 +704,7 @@ pub fn color_wheel(ui: &mut egui::Ui, hue: &mut f32, sat: &mut f32, size: f32, i
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-    painter.circle_stroke(c, r, Stroke::new(1.0, Color32::from_gray(40)));
+    painter.circle_stroke(c, r, Stroke::new(1.0, crate::theme::pal().divider));
     let mut changed = false;
     if resp.double_clicked() {
         *hue = 0.0;
@@ -740,11 +749,11 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, Color32::from_rgb(18, 18, 18));
-    painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(44, 44, 44)), StrokeKind::Inside);
+    painter.rect_filled(rect, 4.0, crate::theme::pal().well);
+    painter.rect_stroke(rect, 4.0, Stroke::new(1.0, crate::theme::pal().divider), StrokeKind::Inside);
 
     // Internal tonal grid lines
-    let grid_stroke = Stroke::new(1.0, Color32::from_rgb(26, 26, 26));
+    let grid_stroke = Stroke::new(1.0, crate::theme::pal().bar);
     for f in [0.25f32, 0.50, 0.75] {
         let gx = rect.left() + rect.width() * f;
         painter.line_segment([pos2(gx, rect.top() + 1.0), pos2(gx, rect.bottom() - 1.0)], grid_stroke);
@@ -781,16 +790,16 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
             } else {
                 Rect::from_min_size(pos2(rect.right() - 18.0, rect.top() + 3.0), vec2(15.0, 15.0))
             };
-            let bg = if active { if left { Color32::from_rgb(20, 60, 120) } else { Color32::from_rgb(120, 25, 25) } } else { Color32::from_rgb(28, 28, 28) };
+            let bg = if active { if left { Color32::from_rgb(20, 60, 120) } else { Color32::from_rgb(120, 25, 25) } } else { crate::theme::pal().well };
             painter.rect_filled(btn_r, 2.0, bg);
-            painter.rect_stroke(btn_r, 2.0, Stroke::new(1.0, Color32::from_rgb(50, 50, 50)), StrokeKind::Inside);
+            painter.rect_stroke(btn_r, 2.0, Stroke::new(1.0, crate::theme::pal().border), StrokeKind::Inside);
 
             let c = if active {
                 if left { Color32::from_rgb(80, 170, 255) } else { Color32::from_rgb(255, 80, 80) }
             } else if clipped {
                 Color32::from_rgb(190, 190, 190)
             } else {
-                Color32::from_rgb(85, 85, 85)
+                crate::theme::pal().text_muted
             };
             let (tx, dir) = if left { (btn_r.left() + 3.0, 1.0) } else { (btn_r.right() - 3.0, -1.0) };
             let ty = btn_r.top() + 3.0;
@@ -818,8 +827,8 @@ pub fn vectorscope(ui: &mut egui::Ui, grid: &[u32], size: usize, skin_line: bool
     let w = ui.available_width().min(220.0);
     let (rect, _) = ui.allocate_exact_size(vec2(w, w), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, Color32::from_gray(18));
-    painter.circle_stroke(rect.center(), w * 0.45, Stroke::new(1.0, Color32::from_gray(50)));
+    painter.rect_filled(rect, 3.0, crate::theme::pal().well);
+    painter.circle_stroke(rect.center(), w * 0.45, Stroke::new(1.0, crate::theme::pal().border));
     let max = grid.iter().copied().max().unwrap_or(1).max(1) as f32;
     let cell = w / size as f32;
     for y in 0..size {
@@ -842,5 +851,5 @@ pub fn vectorscope(ui: &mut egui::Ui, grid: &[u32], size: usize, skin_line: bool
         let c = rect.center();
         painter.line_segment([c, c + vec2(a.cos(), -a.sin()) * w * 0.48], Stroke::new(1.0, Color32::from_rgb(230, 170, 130)));
     }
-    painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_gray(50)), StrokeKind::Inside);
+    painter.rect_stroke(rect, 3.0, Stroke::new(1.0, crate::theme::pal().border), StrokeKind::Inside);
 }
