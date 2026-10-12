@@ -10,7 +10,7 @@ use darkslide_core::{DevelopSettings, Engine};
 
 const HELP: &str = "usage: darkslide --cli [options] FILE...
   -o, --out DIR          output folder (default: next to source)
-  -f, --format FMT       jpg | tif | png | exr (default jpg)
+  -f, --format FMT       jpg | tif | png | exr | psd | avif | jxl | dng (default jpg)
   -q, --quality N        JPEG quality 1-100 (default 92)
   -b, --bits N           8 | 16 | 32
   -s, --size N           resize long edge to N px

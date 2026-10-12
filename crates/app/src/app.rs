@@ -1435,11 +1435,12 @@ impl App {
                 }
             }
         }
-        if let Some(rgb) = self.drag.hover_rgb {
-            ui.label(
-                RichText::new(format!("R {:>3}  G {:>3}  B {:>3}", rgb[0], rgb[1], rgb[2])).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)),
-            );
-        }
+        // always present (blank off the photo) so the panel below never jumps
+        let rgb = match self.drag.hover_rgb {
+            Some(c) => format!("R {:>3}  G {:>3}  B {:>3}", c[0], c[1], c[2]),
+            None => "R      G      B    ".into(),
+        };
+        ui.label(RichText::new(rgb).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)));
         if self.edit.show_scope {
             if let Some(sc) = &self.scope {
                 crate::widgets::vectorscope(ui, sc, crate::worker::SCOPE_SIZE, true);
