@@ -1267,14 +1267,22 @@ impl App {
         if let Some(d) = self.doc() {
             if let Some(e) = &d.engine {
                 ui.add_space(3.0);
-                ui.label(RichText::new(e.source.meta.exposure_summary()).size(11.0).color(Color32::from_rgb(175, 175, 175)));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(e.source.meta.exposure_summary()).size(11.0).color(Color32::from_rgb(175, 175, 175)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{} ms", self.render_ms)).size(10.0).color(Color32::from_rgb(110, 110, 110)))
+                            .on_hover_text("Last preview render time");
+                    });
+                });
                 if let Some(l) = &e.source.meta.lens {
                     ui.label(RichText::new(l).size(10.5).color(Color32::from_rgb(130, 130, 130)));
                 }
             }
         }
         if let Some(rgb) = self.drag.hover_rgb {
-            ui.label(RichText::new(format!("R {:>3}  G {:>3}  B {:>3}", rgb[0], rgb[1], rgb[2])).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)));
+            ui.label(
+                RichText::new(format!("R {:>3}  G {:>3}  B {:>3}", rgb[0], rgb[1], rgb[2])).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)),
+            );
         }
         if self.edit.show_scope {
             if let Some(sc) = &self.scope {
@@ -1331,6 +1339,33 @@ impl App {
         let y = ((c[1] * *h as f32) as isize).clamp(0, *h as isize - 1) as usize;
         let i = (y * w + x) * 4;
         Some([rgba[i], rgba[i + 1], rgba[i + 2]])
+    }
+
+    /// ACR's workflow line: what "Save image" will produce with the current
+    /// export settings, e.g. "Adobe RGB (1998) - 16 bit - 6016 x 4016 (24.2MP) - 300 ppi".
+    fn workflow_text(&self) -> Option<String> {
+        use darkslide_core::export::Format;
+        let ex = self.export.settings.as_ref().unwrap_or(&self.prefs.export);
+        let (cw, ch, _) = self.crop_dims_for_export()?;
+        let sr = if self.doc()?.settings.enhance.super_resolution { 2.0 } else { 1.0 };
+        let (w, h) = darkslide_core::export::output_size(cw * sr, ch * sr, ex.resize, ex.dont_enlarge && sr == 1.0);
+        let bits = match ex.format {
+            Format::Jpeg | Format::Avif => 8,
+            Format::Exr => 32,
+            Format::Dng => 16,
+            _ => ex.bit_depth,
+        };
+        let mp = w as f64 * h as f64 / 1e6;
+        Some(format!("{} - {bits} bit - {w} x {h} ({mp:.1}MP) - {} ppi", ex.color_space.name(), ex.ppi))
+    }
+
+    /// Crop size ignoring the crop tool's uncropped view.
+    fn crop_dims_for_export(&self) -> Option<(f64, f64, bool)> {
+        let d = self.doc()?;
+        let e = d.engine.as_ref()?;
+        let (fw, fh) = e.full_size();
+        let (w, h) = e.geometry(&d.settings, fw, fh, false).crop_size();
+        Some((w, h, false))
     }
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
@@ -1398,14 +1433,9 @@ impl App {
                     self.export.open = true;
                 }
                 ui.add_space(12.0);
-                if let Some(d) = self.doc() {
-                    if let Some(e) = &d.engine {
-                        let (w, h) = e.source.oriented_size();
-                        let mp = (w as f64 * h as f64 / 1_000_000.0 * 10.0).round() / 10.0;
-                        let workflow_text = format!("Adobe RGB (1998); 16 bit; {} × {} ({:.1} MP); 300 ppi", w, h, mp);
-                        if ui.link(RichText::new(workflow_text).small().color(crate::widgets::ACCENT)).on_hover_text("Workflow Options (Preferences)").clicked() {
-                            self.show_prefs = true;
-                        }
+                if let Some(text) = self.workflow_text() {
+                    if ui.link(RichText::new(text).small().color(crate::widgets::ACCENT)).on_hover_text("Output settings (Save image)").clicked() {
+                        self.export.open = true;
                     }
                 }
             });
@@ -1434,27 +1464,33 @@ impl eframe::App for App {
         self.shortcuts(&ctx);
 
         egui::Panel::top("top")
-            .frame(egui::Frame::new()
-                .fill(Color32::from_rgb(26, 26, 26))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
-                .inner_margin(egui::Margin::symmetric(10, 4)))
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(26, 26, 26))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
+            )
             .show(ui, |ui| self.top_bar(ui));
 
         egui::Panel::bottom("bottom")
-            .frame(egui::Frame::new()
-                .fill(Color32::from_rgb(26, 26, 26))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
-                .inner_margin(egui::Margin::symmetric(12, 6)))
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(26, 26, 26))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .inner_margin(egui::Margin::symmetric(12, 6)),
+            )
             .show(ui, |ui| self.bottom_bar(ui));
 
         if self.show_filmstrip && self.docs.len() > 1 {
             egui::Panel::bottom("filmstrip")
                 .resizable(true)
                 .default_size(118.0)
-                .frame(egui::Frame::new()
-                    .fill(Color32::from_rgb(26, 26, 26))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
-                    .inner_margin(egui::Margin::symmetric(10, 6)))
+                .frame(
+                    egui::Frame::new()
+                        .fill(Color32::from_rgb(26, 26, 26))
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                        .inner_margin(egui::Margin::symmetric(10, 6)),
+                )
                 .show(ui, |ui| crate::filmstrip::filmstrip(self, ui));
         }
 
@@ -1463,10 +1499,12 @@ impl eframe::App for App {
             .resizable(false)
             .default_size(44.0)
             .size_range(44.0..=44.0)
-            .frame(egui::Frame::new()
-                .fill(Color32::from_rgb(24, 24, 24))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
-                .inner_margin(egui::Margin::symmetric(4, 6)))
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(24, 24, 24))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
+                    .inner_margin(egui::Margin::symmetric(4, 6)),
+            )
             .show(ui, |ui| self.toolbar_strip(ui));
 
         // Adjustment panel docked to the left of the toolbar strip
@@ -1474,18 +1512,18 @@ impl eframe::App for App {
             .resizable(true)
             .default_size(325.0)
             .size_range(280.0..=560.0)
-            .frame(egui::Frame::new()
-                .fill(Color32::from_rgb(32, 32, 32))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40)))
-                .inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 6 }))
+            .frame(egui::Frame::new().fill(Color32::from_rgb(32, 32, 32)).stroke(Stroke::new(1.0, Color32::from_rgb(40, 40, 40))).inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 8,
+                bottom: 6,
+            }))
             .show(ui, |ui| self.right_panel(ui));
 
         // Central image canvas
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::from_rgb(18, 18, 18)).inner_margin(egui::Margin::same(4)))
-            .show(ui, |ui| {
-                crate::viewer::viewer(self, ui);
-            });
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(18, 18, 18)).inner_margin(egui::Margin::same(4))).show(ui, |ui| {
+            crate::viewer::viewer(self, ui);
+        });
 
         crate::dialogs::show_dialogs(self, &ctx);
         if let Some(l) = crate::widgets::take_auto_slider(&ctx) {

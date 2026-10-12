@@ -112,18 +112,8 @@ pub fn draw_tool_icon(painter: &egui::Painter, tool: Tool, center: Pos2, size: f
         Tool::RedEye => {
             let w = size * 0.40;
             let h = size * 0.22;
-            let pts_top = vec![
-                center + vec2(-w, 0.0),
-                center + vec2(-w * 0.5, -h),
-                center + vec2(w * 0.5, -h),
-                center + vec2(w, 0.0),
-            ];
-            let pts_bot = vec![
-                center + vec2(w, 0.0),
-                center + vec2(w * 0.5, h),
-                center + vec2(-w * 0.5, h),
-                center + vec2(-w, 0.0),
-            ];
+            let pts_top = vec![center + vec2(-w, 0.0), center + vec2(-w * 0.5, -h), center + vec2(w * 0.5, -h), center + vec2(w, 0.0)];
+            let pts_bot = vec![center + vec2(w, 0.0), center + vec2(w * 0.5, h), center + vec2(-w * 0.5, h), center + vec2(-w, 0.0)];
             painter.add(egui::Shape::line(pts_top, Stroke::new(1.3, color)));
             painter.add(egui::Shape::line(pts_bot, Stroke::new(1.3, color)));
             painter.circle_stroke(center, h * 0.72, Stroke::new(1.2, color));
@@ -153,18 +143,8 @@ pub fn draw_tool_icon(painter: &egui::Painter, tool: Tool, center: Pos2, size: f
 pub fn draw_eyeball(painter: &egui::Painter, center: Pos2, size: f32, open: bool, color: Color32) {
     let w = size * 0.45;
     let h = size * 0.26;
-    let pts_top = vec![
-        center + vec2(-w, 0.0),
-        center + vec2(-w * 0.5, -h),
-        center + vec2(w * 0.5, -h),
-        center + vec2(w, 0.0),
-    ];
-    let pts_bot = vec![
-        center + vec2(w, 0.0),
-        center + vec2(w * 0.5, h),
-        center + vec2(-w * 0.5, h),
-        center + vec2(-w, 0.0),
-    ];
+    let pts_top = vec![center + vec2(-w, 0.0), center + vec2(-w * 0.5, -h), center + vec2(w * 0.5, -h), center + vec2(w, 0.0)];
+    let pts_bot = vec![center + vec2(w, 0.0), center + vec2(w * 0.5, h), center + vec2(-w * 0.5, h), center + vec2(-w, 0.0)];
     let stroke = Stroke::new(1.2, color);
     painter.add(egui::Shape::line(pts_top, stroke));
     painter.add(egui::Shape::line(pts_bot, stroke));
@@ -310,47 +290,68 @@ pub fn take_alt_preview(ctx: &egui::Context) -> Option<AltPreview> {
     })
 }
 
-/// Label + value on one line, slider track below. Returns true if changed.
-/// Single-line Camera Raw slider: [Label] [===== Track =====] [Value]
+/// Camera Raw slider: label and boxed value on one line, track underneath.
+/// Returns true if changed.
 pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     let mut changed = false;
     let total_w = ui.available_width();
-    let row_h = 21.0;
-    let (row_rect, _) = ui.allocate_exact_size(vec2(total_w, row_h), Sense::hover());
-    
-    let label_w = 82.0;
-    let val_w = 44.0;
-    let gap = 6.0;
-    let track_w = (total_w - label_w - val_w - gap * 2.0).max(40.0);
 
-    let label_rect = Rect::from_min_size(row_rect.left_top(), vec2(label_w, row_h));
-    let track_rect = Rect::from_min_size(pos2(label_rect.right() + gap, row_rect.top()), vec2(track_w, row_h));
-    let val_rect = Rect::from_min_size(pos2(track_rect.right() + gap, row_rect.top() + 1.0), vec2(val_w, row_h - 2.0));
+    // 1. label + value box
+    ui.horizontal(|ui| {
+        ui.set_width(total_w);
+        let lab = egui::Label::new(RichText::new(spec.label).size(12.0).color(TEXT_PRIMARY)).sense(Sense::click()).truncate();
+        let lab_resp = ui.add(lab);
+        if lab_resp.double_clicked() && ui.input(|i| i.modifiers.shift) {
+            // shift + double-click: auto for this slider only (ACR)
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
+        } else if lab_resp.double_clicked() && *value != spec.default {
+            *value = spec.default;
+            changed = true;
+        }
+        lab_resp.on_hover_text("Double-click to reset, Shift+double-click for Auto");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut v = *value;
+            let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
+            let dv = egui::DragValue::new(&mut v).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
+                let s = format!("{:.*}", spec.decimals, n);
+                let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
+                format!("{s}{}", spec.suffix)
+            });
+            let r = ui
+                .scope(|ui| {
+                    let w = ui.visuals_mut();
+                    w.widgets.inactive.bg_fill = Color32::from_rgb(18, 18, 18);
+                    w.widgets.inactive.weak_bg_fill = Color32::from_rgb(18, 18, 18);
+                    w.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 52));
+                    w.widgets.hovered.bg_fill = Color32::from_rgb(26, 26, 26);
+                    w.widgets.hovered.weak_bg_fill = Color32::from_rgb(26, 26, 26);
+                    w.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(72, 72, 72));
+                    w.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+                    ui.add_sized([50.0, 18.0], dv)
+                })
+                .inner;
+            if r.dragged() {
+                mark_interacting(ui);
+            }
+            if r.changed() && v != *value {
+                *value = round_to(v, spec.decimals);
+                changed = true;
+            }
+        });
+    });
 
-    // 1. Label
-    let lab = egui::Label::new(egui::RichText::new(spec.label).size(12.0).color(TEXT_PRIMARY)).sense(Sense::click());
-    let lab_resp = ui.put(label_rect, lab);
-    if lab_resp.double_clicked() && ui.input(|i| i.modifiers.shift) {
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
-    } else if lab_resp.double_clicked() && *value != spec.default {
-        *value = spec.default;
-        changed = true;
-    }
-    lab_resp.on_hover_text("Double-click to reset, Shift+double-click for Auto");
-
-    // 2. Track & Handle
-    let track_line = Rect::from_center_size(track_rect.center(), vec2(track_rect.width(), 3.0));
-    let painter = ui.painter_at(track_rect.expand(2.0));
-    let track_resp = ui.interact(track_rect, ui.make_persistent_id(("slider_trk", spec.label)), Sense::click_and_drag());
-
+    // 2. track (auto id, so sliders sharing a label never share drag state)
+    let (rect, resp) = ui.allocate_exact_size(vec2(total_w, 14.0), Sense::click_and_drag());
+    let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 12.0, 3.0));
+    let painter = ui.painter_at(rect.expand(2.0));
     match spec.gradient {
         Some(stops) if stops.len() >= 2 => {
             let mut mesh = egui::Mesh::default();
             let n = stops.len();
             for (i, c) in stops.iter().enumerate() {
-                let x = track_line.left() + track_line.width() * i as f32 / (n - 1) as f32;
-                mesh.colored_vertex(pos2(x, track_line.top()), *c);
-                mesh.colored_vertex(pos2(x, track_line.bottom()), *c);
+                let x = track.left() + track.width() * i as f32 / (n - 1) as f32;
+                mesh.colored_vertex(pos2(x, track.top()), *c);
+                mesh.colored_vertex(pos2(x, track.bottom()), *c);
                 if i > 0 {
                     let b = (i * 2) as u32;
                     mesh.add_triangle(b - 2, b - 1, b);
@@ -360,39 +361,31 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             painter.add(egui::Shape::mesh(mesh));
         }
         _ => {
-            painter.rect_filled(track_line, 1.5, Color32::from_rgb(22, 22, 22));
-            let t0 = to_t(&spec, spec.default);
-            let t1 = to_t(&spec, *value);
-            let x0 = track_line.left() + track_line.width() * t0.min(t1);
-            let x1 = track_line.left() + track_line.width() * t0.max(t1);
-            painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, track_line.y_range()), 1.5, ACCENT.gamma_multiply(0.9));
+            painter.rect_filled(track, 1.5, Color32::from_rgb(70, 70, 70));
             if spec.min < spec.default && spec.max > spec.default {
-                let cx = track_line.left() + track_line.width() * t0;
-                painter.line_segment([pos2(cx, track_line.top() - 2.0), pos2(cx, track_line.bottom() + 2.0)], Stroke::new(1.0, Color32::from_rgb(70, 70, 70)));
+                // centre notch for bipolar sliders
+                let cx = track.left() + track.width() * to_t(&spec, spec.default);
+                painter.line_segment([pos2(cx, track.top() - 2.0), pos2(cx, track.bottom() + 2.0)], Stroke::new(1.0, Color32::from_rgb(95, 95, 95)));
             }
         }
     }
+    // ACR's handle: a small pointer sitting on the track
+    let hx = track.left() + track.width() * to_t(&spec, *value);
+    let col = if resp.hovered() || resp.dragged() { Color32::WHITE } else { Color32::from_rgb(205, 205, 205) };
+    let cy = track.center().y;
+    let pts = vec![pos2(hx, cy - 4.0), pos2(hx + 5.0, cy + 1.0), pos2(hx + 5.0, cy + 5.0), pos2(hx - 5.0, cy + 5.0), pos2(hx - 5.0, cy + 1.0)];
+    painter.add(egui::Shape::convex_polygon(pts, col, Stroke::new(1.0, Color32::from_rgb(30, 30, 30))));
 
-    let t = to_t(&spec, *value);
-    let hx = track_line.left() + track_line.width() * t;
-    let handle_col = if track_resp.hovered() || track_resp.dragged() { Color32::WHITE } else { Color32::from_rgb(230, 230, 230) };
-    painter.circle_filled(pos2(hx, track_rect.center().y), 4.5, handle_col);
-    painter.circle_stroke(pos2(hx, track_rect.center().y), 4.5, Stroke::new(1.0, Color32::from_rgb(24, 24, 24)));
-
-    if track_resp.double_clicked() {
+    if resp.double_clicked() {
         if *value != spec.default {
             *value = spec.default;
             changed = true;
         }
-    } else if track_resp.dragged() || track_resp.clicked() {
-        if let Some(p) = track_resp.interact_pointer_pos() {
+    } else if resp.dragged() || resp.clicked() {
+        if let Some(p) = resp.interact_pointer_pos() {
             let fine = ui.input(|i| i.modifiers.shift);
-            let nt = if fine && track_resp.dragged() {
-                let d = track_resp.drag_delta().x / track_line.width() * 0.1;
-                to_t(&spec, *value) + d
-            } else {
-                (p.x - track_line.left()) / track_line.width()
-            };
+            let nt =
+                if fine && resp.dragged() { to_t(&spec, *value) + resp.drag_delta().x / track.width() * 0.1 } else { (p.x - track.left()) / track.width() };
             let mut nv = round_to(from_t(&spec, nt), spec.decimals);
             if spec.log {
                 nv = nv.round();
@@ -402,7 +395,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
                 changed = true;
             }
         }
-        if track_resp.dragged() {
+        if resp.dragged() {
             mark_interacting(ui);
             if ui.input(|i| i.modifiers.alt) {
                 if let Some(k) = alt_kind(spec.label) {
@@ -411,35 +404,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             }
         }
     }
-
-    // 3. Value Box
-    let mut v = *value;
-    let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
-    let dv = egui::DragValue::new(&mut v).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
-        let s = format!("{:.*}", spec.decimals, n);
-        let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
-        format!("{s}{}", spec.suffix)
-    });
-
-    let r = ui.scope(|ui| {
-        ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(18, 18, 18);
-        ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(42, 42, 42));
-        ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(26, 26, 26);
-        ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
-        ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(14, 14, 14);
-        ui.visuals_mut().widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-        ui.put(val_rect, dv)
-    }).inner;
-
-    if r.dragged() {
-        mark_interacting(ui);
-    }
-    if r.changed() && v != *value {
-        *value = round_to(v, spec.decimals);
-        changed = true;
-    }
-
-    ui.add_space(2.0);
+    ui.add_space(3.0);
     changed
 }
 
@@ -478,11 +443,7 @@ pub fn sub_header(ui: &mut egui::Ui, title: &str) {
     let total_w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(total_w, 15.0), Sense::hover());
     let painter = ui.painter_at(rect);
-    let galley = painter.layout_no_wrap(
-        title.to_string(),
-        egui::FontId::proportional(10.5),
-        Color32::from_rgb(140, 140, 140),
-    );
+    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(10.5), Color32::from_rgb(140, 140, 140));
     let text_w = galley.size().x;
     painter.galley(rect.left_top(), galley, Color32::from_rgb(140, 140, 140));
     if text_w + 12.0 < rect.width() {
@@ -534,6 +495,7 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
     let full_w = ui.available_width();
     let header_h = 28.0;
     let (header_rect, header_resp) = ui.allocate_exact_size(vec2(full_w, header_h), Sense::click());
+    header_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, title));
     let painter = ui.painter_at(header_rect);
 
     if header_resp.hovered() {
@@ -555,11 +517,9 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
         Color32::from_rgb(160, 160, 160),
     );
 
-    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(12.5), Color32::from_rgb(225, 225, 225));
-    let text_w = galley.size().x;
-    let label_rect = Rect::from_min_size(pos2(header_rect.left() + 20.0, header_rect.top()), vec2(text_w + 8.0, header_h));
-    let lab = egui::Label::new(RichText::new(title).size(12.5).strong().color(Color32::from_rgb(225, 225, 225)));
-    ui.put(label_rect, lab);
+    // painted, not a Label: a selectable label would swallow the header click
+    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(13.0), Color32::from_rgb(225, 225, 225));
+    painter.galley(pos2(header_rect.left() + 20.0, header_rect.center().y - galley.size().y / 2.0), galley, Color32::from_rgb(225, 225, 225));
 
     let mut eye_clicked = false;
     if let Some(en) = enabled {
@@ -568,11 +528,7 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
         if eye_resp.hovered() {
             painter.rect_filled(eye_rect, 2.0, Color32::from_rgb(52, 52, 52));
         }
-        let eye_col = if *en {
-            if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) }
-        } else {
-            Color32::from_rgb(90, 90, 90)
-        };
+        let eye_col = if *en { if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) } } else { Color32::from_rgb(90, 90, 90) };
         draw_eyeball(&painter, eye_rect.center(), 14.0, *en, eye_col);
         if eye_resp.on_hover_text("Toggle section on/off").clicked() {
             *en = !*en;
@@ -587,10 +543,7 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
 
     let r = state.show_body_unindented(ui, |ui| {
         ui.add_space(4.0);
-        let out = egui::Frame::new()
-            .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 6 })
-            .show(ui, |ui| body(ui))
-            .inner;
+        let out = egui::Frame::new().inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 6 }).show(ui, |ui| body(ui)).inner;
         ui.add_space(4.0);
         out
     });
@@ -836,7 +789,7 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, Color32::from_rgb(18, 18, 18));
     painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(44, 44, 44)), StrokeKind::Inside);
-    
+
     // Internal tonal grid lines
     let grid_stroke = Stroke::new(1.0, Color32::from_rgb(26, 26, 26));
     for f in [0.25f32, 0.50, 0.75] {
@@ -875,14 +828,10 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
             } else {
                 Rect::from_min_size(pos2(rect.right() - 18.0, rect.top() + 3.0), vec2(15.0, 15.0))
             };
-            let bg = if active {
-                if left { Color32::from_rgb(20, 60, 120) } else { Color32::from_rgb(120, 25, 25) }
-            } else {
-                Color32::from_rgb(28, 28, 28)
-            };
+            let bg = if active { if left { Color32::from_rgb(20, 60, 120) } else { Color32::from_rgb(120, 25, 25) } } else { Color32::from_rgb(28, 28, 28) };
             painter.rect_filled(btn_r, 2.0, bg);
             painter.rect_stroke(btn_r, 2.0, Stroke::new(1.0, Color32::from_rgb(50, 50, 50)), StrokeKind::Inside);
-            
+
             let c = if active {
                 if left { Color32::from_rgb(80, 170, 255) } else { Color32::from_rgb(255, 80, 80) }
             } else if clipped {

@@ -36,8 +36,8 @@ pub fn smoke(args: Vec<String>) -> anyhow::Result<()> {
             Tool::Edit,
             &[
                 "Auto",
-                "Black & White",
-                "Color",
+                "B&W",
+                "B&W",
                 "Curve",
                 "Detail",
                 "Color Mixer",

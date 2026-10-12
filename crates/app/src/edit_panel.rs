@@ -5,7 +5,7 @@ use darkslide_core::analysis::Histogram;
 use darkslide_core::params::*;
 use darkslide_core::pipeline::curves::{Lut, point_curve_lut};
 use darkslide_core::profiles::{self, BUILTIN_LOOKS, PROFILES};
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, Color32, RichText};
 
 use crate::doc::Doc;
 use crate::widgets::{self, SliderSpec, section, slider};
@@ -76,61 +76,69 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     let is_raw = engine.is_raw();
     let s = &mut doc.settings;
 
-    // ------------------------------------------------------------- Profile
-    section(ui, "Profile", None, true, |ui| {
+    // ------------------------------------------------------------- Edit header
+    // ACR: "Edit" with Auto / B&W, then the profile row (not collapsible)
+    let mut profile_block = |ui: &mut egui::Ui| {
+        ui.add_space(2.0);
         ui.horizontal(|ui| {
-            let c_sel = s.treatment == Treatment::Color;
-            let bw_sel = s.treatment == Treatment::BlackAndWhite;
-            let c_btn = egui::Button::new(RichText::new("Color").size(12.0).color(if c_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
-                .fill(if c_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
-                .stroke(if c_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
-                .corner_radius(3.0)
-                .min_size(egui::vec2(60.0, 22.0));
-            if ui.add(c_btn).clicked() {
-                s.treatment = Treatment::Color;
-            }
-            let bw_btn = egui::Button::new(RichText::new("Black & White").size(12.0).color(if bw_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
-                .fill(if bw_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
-                .stroke(if bw_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
-                .corner_radius(3.0)
-                .min_size(egui::vec2(100.0, 22.0));
-            if ui.add(bw_btn).clicked() {
-                s.treatment = Treatment::BlackAndWhite;
-            }
-        });
-        ui.add_space(4.0);
-        let shown = s.profile.strip_prefix("dcp:").map(|p| dcp_name(p)).unwrap_or_else(|| s.profile.clone());
-        let full_w = ui.available_width();
-        egui::ComboBox::from_id_salt("profile").width((full_w - 12.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
-            let mut group = "";
-            for p in PROFILES {
-                if p.group != group {
-                    group = p.group;
-                    ui.label(RichText::new(group).weak().small());
-                }
-                if ui.selectable_label(s.profile == p.name, p.name).clicked() {
-                    s.profile = p.name.to_string();
-                    if p.monochrome {
+            ui.label(RichText::new("Edit").size(15.0).strong().color(Color32::WHITE));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let bw = s.treatment == Treatment::BlackAndWhite;
+                if ui.add(egui::Button::new("B&W").selected(bw)).on_hover_text("Convert to black & white").clicked() {
+                    if bw {
+                        s.treatment = Treatment::Color;
+                        // a monochrome profile would keep the image grey
+                        if profiles::find(&s.profile).monochrome {
+                            s.profile = "Color".into();
+                        }
+                    } else {
                         s.treatment = Treatment::BlackAndWhite;
-                    } else if s.treatment == Treatment::BlackAndWhite && !p.monochrome {
-                        s.treatment = Treatment::Color;
                     }
                 }
-            }
-            if is_raw {
-                let m = &engine.source.meta;
-                let dcps: Vec<(String, String)> =
-                    dcp_catalog().iter().filter(|d| d.matches(&m.make, &m.model)).map(|d| (d.name.clone(), d.path.to_string_lossy().to_string())).collect();
-                if !dcps.is_empty() {
-                    ui.label(RichText::new("Camera profiles (DCP)").weak().small());
+                if ui.button("Auto").on_hover_text("Auto tone (Ctrl+U)").clicked() {
+                    pc.actions.push(Action::AutoTone);
                 }
-                for (name, path) in dcps {
-                    let id = format!("dcp:{path}");
-                    if ui.selectable_label(s.profile == id, name).clicked() {
-                        s.profile = id;
-                        s.treatment = Treatment::Color;
+            });
+        });
+        ui.add_space(6.0);
+        let shown = s.profile.strip_prefix("dcp:").map(|p| dcp_name(p)).unwrap_or_else(|| s.profile.clone());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Profile").size(12.0));
+            let full_w = ui.available_width();
+            egui::ComboBox::from_id_salt("profile").width((full_w - 36.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
+                let mut group = "";
+                for p in PROFILES {
+                    if p.group != group {
+                        group = p.group;
+                        ui.label(RichText::new(group).weak().small());
+                    }
+                    if ui.selectable_label(s.profile == p.name, p.name).clicked() {
+                        s.profile = p.name.to_string();
+                        if p.monochrome {
+                            s.treatment = Treatment::BlackAndWhite;
+                        } else if s.treatment == Treatment::BlackAndWhite && !p.monochrome {
+                            s.treatment = Treatment::Color;
+                        }
                     }
                 }
+                if is_raw {
+                    let m = &engine.source.meta;
+                    let dcps: Vec<(String, String)> =
+                        dcp_catalog().iter().filter(|d| d.matches(&m.make, &m.model)).map(|d| (d.name.clone(), d.path.to_string_lossy().to_string())).collect();
+                    if !dcps.is_empty() {
+                        ui.label(RichText::new("Camera profiles (DCP)").weak().small());
+                    }
+                    for (name, path) in dcps {
+                        let id = format!("dcp:{path}");
+                        if ui.selectable_label(s.profile == id, name).clicked() {
+                            s.profile = id;
+                            s.treatment = Treatment::Color;
+                        }
+                    }
+                }
+            });
+            if ui.button("▦").on_hover_text("Browse profiles and looks").clicked() {
+                pc.actions.push(Action::BrowseProfiles);
             }
         });
         let prof = profiles::find(&s.profile);
@@ -140,8 +148,8 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         ui.add_space(4.0);
         let look_name = s.look.as_ref().map(|l| l.name.clone()).unwrap_or_else(|| "None".into());
         ui.horizontal(|ui| {
-            ui.label("Look");
-            egui::ComboBox::from_id_salt("look").width((ui.available_width() - 80.0).max(60.0)).selected_text(look_name).show_ui(ui, |ui| {
+            ui.label(RichText::new("Look").size(12.0));
+            egui::ComboBox::from_id_salt("look").width((ui.available_width() - 36.0).max(60.0)).selected_text(look_name).show_ui(ui, |ui| {
                 if ui.selectable_label(s.look.is_none(), "None").clicked() {
                     s.look = None;
                 }
@@ -166,9 +174,6 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     }
                 }
             });
-            if ui.button("▦").on_hover_text("Browse profiles and looks").clicked() {
-                pc.actions.push(Action::BrowseProfiles);
-            }
             if ui.button("+").on_hover_text("Import a .cube LUT as a profile").clicked() {
                 pc.actions.push(Action::ImportLook);
             }
@@ -176,7 +181,10 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         if let Some(l) = s.look.as_mut() {
             slider(ui, &mut l.amount, SliderSpec::new("Look amount", 0.0, 200.0, 100.0));
         }
-    });
+        ui.add_space(6.0);
+        ui.separator();
+    };
+    profile_block(ui);
 
     // ------------------------------------------------------------- Basic
     let mut basic_on = s.panels.basic;
@@ -209,9 +217,9 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         let gti = widgets::grad_tint();
         let (def_t, def_ti) = engine.resolved_temp_tint(&DevelopSettings { wb_mode: WbMode::AsShot, ..s.clone() });
         let tchg = if is_raw {
-            slider(ui, &mut t, SliderSpec::new("Temp", 1500.0, 50000.0, def_t).grad(&gt).log())
+            slider(ui, &mut t, SliderSpec::new("Temperature", 1500.0, 50000.0, def_t).grad(&gt).log())
         } else {
-            slider(ui, &mut t, SliderSpec::new("Temp", -100.0, 100.0, 0.0).grad(&gt))
+            slider(ui, &mut t, SliderSpec::new("Temperature", -100.0, 100.0, 0.0).grad(&gt))
         };
         let tichg = slider(ui, &mut ti, SliderSpec::new("Tint", -150.0, 150.0, def_ti).grad(&gti));
         if tchg || tichg {
