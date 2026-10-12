@@ -143,6 +143,35 @@ pub fn smoke(args: Vec<String>) -> anyhow::Result<()> {
             d.settings.wb_mode
         );
     }
+    // reset-all asks first: cancel keeps edits, confirm resets, undo restores
+    {
+        use egui_kittest::kittest::Queryable;
+        harness.state_mut().tools.tool = Tool::Edit;
+        if let Some(d) = harness.state_mut().doc_mut() {
+            d.settings.exposure = 1.0;
+            d.settings.clarity = 30.0;
+        }
+        settle(&mut harness, 5);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::R);
+        settle(&mut harness, 5);
+        let shown = harness.state().confirm_reset;
+        if let Some(n) = harness.query_by_label("Cancel") {
+            n.click();
+        }
+        settle(&mut harness, 5);
+        let kept = harness.state().doc().map(|d| d.settings.exposure == 1.0).unwrap_or(false);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::R);
+        settle(&mut harness, 5);
+        if let Some(n) = harness.query_by_label("Reset all") {
+            n.click();
+        }
+        settle(&mut harness, 5);
+        let reset = harness.state().doc().map(|d| d.settings.exposure == 0.0 && d.settings.clarity == 0.0).unwrap_or(false);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness, 5);
+        let undone = harness.state().doc().map(|d| d.settings.exposure == 1.0).unwrap_or(false);
+        println!("reset-all: dialog={shown} cancel-keeps={kept} reset={reset} undo={undone}");
+    }
     // keyboard shortcuts
     for k in [egui::Key::U, egui::Key::O, egui::Key::Q, egui::Key::Q, egui::Key::Z, egui::Key::Z, egui::Key::ArrowRight, egui::Key::ArrowLeft] {
         harness.key_press(k);

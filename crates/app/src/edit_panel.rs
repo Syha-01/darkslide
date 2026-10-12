@@ -66,6 +66,8 @@ pub enum Action {
     UprightAnalyze(Upright),
     ImportLook,
     AutoGrayMix,
+    /// Ask before resetting every setting to the defaults.
+    ResetAll,
 }
 
 pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut PanelCtx) {
@@ -94,6 +96,9 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     } else {
                         s.treatment = Treatment::BlackAndWhite;
                     }
+                }
+                if ui.button("Reset").on_hover_text("Reset all settings to the defaults (Ctrl+R)").clicked() {
+                    pc.actions.push(Action::ResetAll);
                 }
                 if ui.button("Auto").on_hover_text("Auto tone (Ctrl+U)").clicked() {
                     pc.actions.push(Action::AutoTone);

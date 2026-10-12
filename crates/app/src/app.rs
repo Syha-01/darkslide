@@ -125,6 +125,8 @@ pub struct App {
     pub grid: bool,
     pub profiles: crate::dialogs::ProfileBrowser,
     pub distract_jobs: Arc<Mutex<Vec<(u64, Option<darkslide_core::params::RetouchSpot>)>>>,
+    /// "Reset all settings?" confirmation is showing.
+    pub confirm_reset: bool,
 }
 
 impl App {
@@ -182,6 +184,7 @@ impl App {
             grid: false,
             profiles: Default::default(),
             distract_jobs: Arc::new(Mutex::new(vec![])),
+            confirm_reset: false,
         };
         app.edit.show_scope = app.prefs.show_vectorscope;
         app.open_paths(paths);
@@ -539,6 +542,18 @@ impl App {
         }
     }
 
+    /// Reset every setting of the current image to the defaults (the saved
+    /// camera defaults when there are any). Undoable.
+    pub fn reset_all(&mut self) {
+        let Some(d) = self.doc_mut() else { return };
+        let raw = d.is_raw();
+        let def = d.engine.as_ref().and_then(|e| crate::doc::load_camera_default(e)).unwrap_or_else(|| DevelopSettings::defaults_for(raw));
+        d.settings = def;
+        self.tools.selected_mask = None;
+        self.tools.selected_spot = None;
+        self.status = "All settings reset (Ctrl+Z to undo)".into();
+    }
+
     /// Shift + double-click on a Basic slider label sets just that slider.
     fn auto_one(&mut self, label: &str) {
         let Some(d) = self.doc_mut() else { return };
@@ -591,6 +606,7 @@ impl App {
                     d.settings.retouch.extend(spots);
                     self.status = format!("Found {n} dust spot(s)");
                 }
+                Action::ResetAll => self.confirm_reset = true,
                 Action::BrowseProfiles => {
                     let (st, id) = (d.settings.clone(), d.id);
                     self.profiles.open(&e, &st, id);
@@ -761,11 +777,8 @@ impl App {
         if cmd && pressed(Key::Quote) {
             self.grid = !self.grid;
         }
-        if cmd && pressed(Key::R) {
-            if let Some(d) = self.doc_mut() {
-                let raw = d.is_raw();
-                d.settings = DevelopSettings::defaults_for(raw);
-            }
+        if cmd && pressed(Key::R) && self.doc().is_some() {
+            self.confirm_reset = true;
         }
         if cmd && pressed(Key::Num0) {
             self.zoom = if alt { Zoom::Scale(1.0) } else { Zoom::Fit };
@@ -1054,11 +1067,8 @@ impl App {
                     self.pending_actions.push(Action::AutoWb);
                     ui.close();
                 }
-                if ui.button("Reset to defaults  Ctrl+R").clicked() {
-                    if let Some(d) = self.doc_mut() {
-                        let raw = d.is_raw();
-                        d.settings = DevelopSettings::defaults_for(raw);
-                    }
+                if ui.button("Reset all settings…  Ctrl+R").clicked() {
+                    self.confirm_reset = true;
                     ui.close();
                 }
                 if ui.button("Reset to open settings").clicked() {

@@ -840,7 +840,46 @@ fn profile_browser(app: &mut App, ctx: &egui::Context) {
     app.profiles.open = open;
 }
 
+fn reset_confirm(app: &mut App, ctx: &egui::Context) {
+    if !app.confirm_reset {
+        return;
+    }
+    let mut confirmed = false;
+    let mut cancel = false;
+    let resp = egui::Modal::new(egui::Id::new("confirm_reset")).show(ctx, |ui| {
+        ui.set_max_width(380.0);
+        ui.heading("Reset all settings?");
+        ui.add_space(6.0);
+        ui.label("This puts every setting of this image back to its defaults:");
+        ui.label(
+            RichText::new("tone, color, curves, detail, optics, geometry, effects, profile, white balance, crop, masks, spot removal and red eye.").weak(),
+        );
+        ui.add_space(4.0);
+        ui.label("You can undo it with Ctrl+Z.");
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            let reset = egui::Button::new(RichText::new("Reset all").strong().color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(170, 45, 45));
+            if ui.add(reset).clicked() {
+                confirmed = true;
+            }
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            confirmed = true;
+        }
+    });
+    if confirmed {
+        app.reset_all();
+        app.confirm_reset = false;
+    } else if cancel || resp.should_close() {
+        app.confirm_reset = false;
+    }
+}
+
 pub fn show_dialogs(app: &mut App, ctx: &egui::Context) {
+    reset_confirm(app, ctx);
     profile_browser(app, ctx);
     merge_window(app, ctx);
     export_window(app, ctx);
