@@ -731,11 +731,16 @@ pub fn point_color_ui_ext(ui: &mut egui::Ui, pcs: &mut Vec<PointColor>, sel: &mu
 
 pub fn grading_ui(ui: &mut egui::Ui, g: &mut ColorGrading, view: &mut u8, id: &str) {
     let w = ui.available_width();
-    // wraps rather than widening the panel
-    ui.horizontal_wrapped(|ui| {
+    // one even row of tabs that always fits the panel
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        for (i, t) in ["3-way", "Shadows", "Midtones", "Highlights", "Global"].iter().enumerate() {
-            ui.selectable_value(view, i as u8, *t);
+        let tw = ((w - 8.0) / 5.0).floor();
+        let tabs = [("3-way", "Shadows, midtones and highlights"), ("Shadow", "Shadows"), ("Mid", "Midtones"), ("High", "Highlights"), ("Global", "Global")];
+        for (i, (t, tip)) in tabs.iter().enumerate() {
+            let b = egui::Button::selectable(*view == i as u8, RichText::new(*t).size(11.0)).truncate();
+            if ui.add_sized([tw, 22.0], b).on_hover_text(*tip).clicked() {
+                *view = i as u8;
+            }
         }
     });
     let wheel = |ui: &mut egui::Ui, wh: &mut Wheel, title: &str, size: f32| {
@@ -753,12 +758,24 @@ pub fn grading_ui(ui: &mut egui::Ui, g: &mut ColorGrading, view: &mut u8, id: &s
     };
     match *view {
         0 => {
-            let sz = ((w - 24.0) / 2.0 - 10.0).clamp(60.0, 110.0);
-            wheel(ui, &mut g.midtones, "Midtones", sz);
-            ui.columns(2, |cols| {
-                wheel(&mut cols[0], &mut g.shadows, "Shadows", sz);
-                wheel(&mut cols[1], &mut g.highlights, "Highlights", sz);
+            // three wheels side by side, each a card with its own luminance track
+            let gap = 6.0;
+            let cw = ((w - 2.0 * gap) / 3.0).floor();
+            let p = crate::theme::pal();
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (title, wh) in [("SHADOWS", &mut g.shadows), ("MIDTONES", &mut g.midtones), ("HIGHLIGHTS", &mut g.highlights)] {
+                    let (card, _) = ui.allocate_exact_size(egui::vec2(cw, cw + 40.0), egui::Sense::hover());
+                    ui.painter().rect_filled(card, 6.0, p.well);
+                    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink2(egui::vec2(4.0, 5.0))).layout(egui::Layout::top_down(egui::Align::Center)));
+                    c.spacing_mut().item_spacing.y = 3.0;
+                    c.label(RichText::new(title).size(9.5).color(p.text_muted));
+                    let sz = cw - 14.0;
+                    widgets::color_wheel(&mut c, &mut wh.hue, &mut wh.sat, sz, egui::Id::new((id, title)));
+                    widgets::mini_lum(&mut c, &mut wh.lum, cw - 8.0);
+                }
             });
+            ui.label(RichText::new("Single wheels show exact values.").size(10.5).color(crate::theme::pal().text_muted));
         }
         1 => wheel(ui, &mut g.shadows, "Shadows", (w - 30.0).min(220.0)),
         2 => wheel(ui, &mut g.midtones, "Midtones", (w - 30.0).min(220.0)),

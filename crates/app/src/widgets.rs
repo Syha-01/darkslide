@@ -679,6 +679,39 @@ pub fn color_wheel(ui: &mut egui::Ui, hue: &mut f32, sat: &mut f32, size: f32, i
     changed
 }
 
+/// A bare luminance track for tight spots (the 3-way grading wheels):
+/// drag to set, double-click resets, the value shows on hover.
+pub fn mini_lum(ui: &mut egui::Ui, v: &mut f32, width: f32) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 14.0), Sense::click_and_drag());
+    let track = Rect::from_center_size(rect.center(), vec2(width - 8.0, 4.0));
+    let painter = ui.painter_at(rect.expand(2.0));
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(track.left_top(), Color32::from_gray(20));
+    mesh.colored_vertex(track.right_top(), Color32::from_gray(235));
+    mesh.colored_vertex(track.right_bottom(), Color32::from_gray(235));
+    mesh.colored_vertex(track.left_bottom(), Color32::from_gray(20));
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
+    painter.line_segment([pos2(track.center().x, track.top() - 2.0), pos2(track.center().x, track.bottom() + 2.0)], Stroke::new(1.0, crate::theme::pal().notch));
+    let mut changed = false;
+    if resp.double_clicked() {
+        *v = 0.0;
+        changed = true;
+    } else if (resp.dragged() || resp.clicked())
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        *v = (((p.x - track.left()) / track.width()) * 200.0 - 100.0).clamp(-100.0, 100.0).round();
+        changed = true;
+        mark_interacting(ui);
+    }
+    let x = track.left() + (*v + 100.0) / 200.0 * track.width();
+    painter.circle_filled(pos2(x, track.center().y), 5.0, Color32::from_gray(230));
+    painter.circle_stroke(pos2(x, track.center().y), 5.0, Stroke::new(1.0, Color32::from_gray(40)));
+    resp.on_hover_text(format!("Luminance {:+.0}  (double-click to reset)", v));
+    changed
+}
+
 // ---------------------------------------------------------------------------
 // Histogram
 
