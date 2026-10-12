@@ -179,7 +179,7 @@ fn remove(img: &mut Image3, spot: &RetouchSpot) {
     let hole = wm.map(|v| if v > 0.02 { 1.0 } else { 0.0 });
     // PatchMatch cost grows with the hole; fill big strokes at reduced size
     let n = hole.data.iter().filter(|&&v| v > 0.5).count();
-    let f = ((n as f32 / 40_000.0).sqrt().ceil() as usize).max(1);
+    let f = ((n as f32 / 150_000.0).sqrt().ceil() as usize).max(1);
     let filled = if f > 1 && win.w / f >= 16 && win.h / f >= 16 {
         let small = win.downscale_int(f);
         let small_hole = hole.resize(small.w, small.h).map(|v| if v > 0.01 { 1.0 } else { 0.0 });

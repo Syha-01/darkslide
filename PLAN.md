@@ -514,6 +514,18 @@ Session 1, later still:
   object masks, remove, red eye, TAT and the WB eyedropper — passes on all
   six sample cameras
 
+### Session 2 (2026-10-11 evening)
+- Merged `camera-raw-ui` (user's ACR-style redesign) into master after fixes:
+  slider id clashes (shared labels drove each other), section titles not
+  toggling (selectable Label over the header), "Temp" label broke per-slider
+  auto, hard-coded workflow line. Sliders follow ACR's two-line layout; Edit
+  header with Auto / B&W; workflow line reflects real export settings.
+- Remove tool: replaced PatchMatch (its per-pixel matches were incoherent →
+  flat fills) with exemplar onion-peel inpainting (Criminisi): coherent
+  texture, ~10x faster; retouch results cached per spot prefix; large
+  strokes filled at reduced size. Full-res edge stroke 8.7 s → 0.37 s.
+- Reference ACR screenshots: jkost.com/blog/?p=17009 (v12.3 UI, still current).
+
 ### How to resume
 1. `export PATH=$HOME/.cargo/bin:$PATH; scripts/fetch-testdata.sh`
 2. `cargo test && cargo build --release -p darkslide --features screenshot`
