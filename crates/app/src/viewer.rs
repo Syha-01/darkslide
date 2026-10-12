@@ -196,7 +196,14 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
                     pos2(rect.min.x + r.x0 as f32 * rect.width(), rect.min.y + r.y0 as f32 * rect.height()),
                     pos2(rect.min.x + r.x1 as f32 * rect.width(), rect.min.y + r.y1 as f32 * rect.height()),
                 );
-                if d.ignore_crop == crop_tool {
+                // a tile from an earlier zoom/pan/crop would land in the wrong
+                // place or scale; show the fit preview until the new one arrives
+                let vis = rect.intersect(view);
+                let matches_view = vis.is_positive()
+                    && (dr.min - vis.min).length() < 2.0
+                    && (dr.max - vis.max).length() < 2.0
+                    && ((dr.width() * ppp) - d.w as f32).abs() <= 2.0;
+                if d.ignore_crop == crop_tool && matches_view {
                     painter.image(d.tex.id(), dr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
             }
