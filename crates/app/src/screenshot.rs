@@ -96,6 +96,22 @@ pub fn smoke(args: Vec<String>) -> anyhow::Result<()> {
     // crop: drag the top-left corner inwards, then rotate from outside
     harness.state_mut().tools.tool = Tool::Crop;
     settle(&mut harness, 15);
+    harness.state_mut().tools.straighten = false;
+    harness.state_mut().pick = crate::edit_panel::Pick::None;
+    settle(&mut harness, 3);
+    // cursor hints: walk outwards from the centre, record distinct cursors
+    for (name, dir) in [("diagonal", egui::vec2(-1.0, -0.66)), ("left", egui::vec2(-1.0, 0.0))] {
+        let mut seen: Vec<egui::CursorIcon> = vec![];
+        for k in 0..60 {
+            harness.hover_at(c + dir * (k as f32 * 12.0));
+            harness.step();
+            let icon = harness.output().platform_output.cursor_icon;
+            if seen.last() != Some(&icon) {
+                seen.push(icon);
+            }
+        }
+        println!("crop cursors {name}: {seen:?}");
+    }
     let img_tl = c - egui::vec2(view.width() * 0.45, view.height() * 0.3);
     drag(&mut harness, img_tl, img_tl + egui::vec2(80.0, 60.0));
     drag(&mut harness, c, c + egui::vec2(40.0, 20.0));

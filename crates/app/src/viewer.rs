@@ -338,15 +338,181 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     // ---------------------------------------------------------- overlays
     draw_overlays(app, &painter, &map, resp.hover_pos());
 
-    // cursor hints
-    if resp.hovered() {
-        let icon = match (app.pick, app.tools.tool) {
-            (Pick::None, Tool::Edit) if matches!(app.zoom, Zoom::Scale(_)) => egui::CursorIcon::Grab,
-            (Pick::None, Tool::Edit) => egui::CursorIcon::ZoomIn,
-            (Pick::None, Tool::Crop) => egui::CursorIcon::Crosshair,
-            _ => egui::CursorIcon::Crosshair,
+    // cursor hints: show what a press here would do
+    if resp.hovered() || app.drag.active() {
+        let at = resp.hover_pos().or(pointer).unwrap_or(app.drag.last);
+        let c = if space {
+            if app.drag.kind == DragKind::Pan { Cursor::Icon(egui::CursorIcon::Grabbing) } else { Cursor::Icon(egui::CursorIcon::Grab) }
+        } else {
+            cursor_for(app, &map, at)
         };
-        ui.ctx().set_cursor_icon(if space { egui::CursorIcon::Grab } else { icon });
+        match c {
+            Cursor::Icon(i) => ui.ctx().set_cursor_icon(i),
+            Cursor::Rotate => {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                draw_rotate_cursor(&painter, at, crop_corners_screen(&map));
+            }
+        }
+    }
+}
+
+enum Cursor {
+    Icon(egui::CursorIcon),
+    /// No system rotate cursor exists, so it's drawn.
+    Rotate,
+}
+
+/// Double-headed resize cursor closest to a screen direction.
+fn resize_cursor(d: Vec2) -> egui::CursorIcon {
+    use egui::CursorIcon::*;
+    let a = d.y.atan2(d.x).to_degrees().rem_euclid(180.0);
+    match ((a + 22.5) / 45.0) as u32 % 4 {
+        0 => ResizeHorizontal,
+        1 => ResizeNwSe,
+        2 => ResizeVertical,
+        _ => ResizeNeSw,
+    }
+}
+
+/// The cursor for what a press at `p` would start (or the drag in progress).
+/// Mirrors the hit tests in begin_tool_drag without changing anything.
+fn cursor_for(app: &App, map: &ViewMap, p: Pos2) -> Cursor {
+    use egui::CursorIcon::*;
+    let corners = crop_corners_screen(map);
+    let crop_handle = |i: u8| -> egui::CursorIcon {
+        let c = corners[0].lerp(corners[2], 0.5);
+        let at = if i < 4 { corners[i as usize] } else { corners[(i - 4) as usize].lerp(corners[(i - 3) as usize % 4], 0.5) };
+        resize_cursor(at - c)
+    };
+    let zoomed = matches!(app.zoom, Zoom::Scale(_));
+    match app.drag.kind {
+        DragKind::Pan if zoomed => return Cursor::Icon(Grabbing),
+        DragKind::CropMove | DragKind::SpotMove(_) | DragKind::SpotSource(_) | DragKind::LinearHandle(2) | DragKind::RadialHandle(0) => {
+            return Cursor::Icon(Grabbing);
+        }
+        DragKind::CropHandle(i) => return Cursor::Icon(crop_handle(i)),
+        DragKind::CropRotate => return Cursor::Rotate,
+        DragKind::LinearHandle(_) | DragKind::RadialHandle(_) | DragKind::RadialNew | DragKind::LinearNew | DragKind::ObjectBox | DragKind::Straighten => {
+            return Cursor::Icon(Crosshair);
+        }
+        DragKind::Tat => return Cursor::Icon(ResizeVertical),
+        DragKind::None | DragKind::Pan => {}
+        _ => return Cursor::Icon(Crosshair),
+    }
+    match app.pick {
+        Pick::None => {}
+        Pick::TatCurve | Pick::TatMixer(_) => return Cursor::Icon(ResizeVertical),
+        _ => return Cursor::Icon(Crosshair),
+    }
+    let Some(doc) = app.doc() else { return Cursor::Icon(Default) };
+    match app.tools.tool {
+        Tool::Crop => {
+            if app.tools.straighten {
+                return Cursor::Icon(Crosshair);
+            }
+            for i in 0..4u8 {
+                if corners[i as usize].distance(p) < 14.0 {
+                    return Cursor::Icon(crop_handle(i));
+                }
+            }
+            for i in 0..4u8 {
+                if corners[i as usize].lerp(corners[(i as usize + 1) % 4], 0.5).distance(p) < 14.0 {
+                    return Cursor::Icon(crop_handle(4 + i));
+                }
+            }
+            let mut inside = false;
+            for i in 0..4 {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+                    inside = !inside;
+                }
+            }
+            Cursor::Icon(if inside { Move } else { return Cursor::Rotate })
+        }
+        Tool::Masking => {
+            let tu = &app.tools;
+            if let (Some(mi), Some(ci)) = (tu.selected_mask, tu.selected_comp)
+                && let Some(c) = doc.settings.masks.get(mi).and_then(|m| m.components.get(ci))
+            {
+                match &c.shape {
+                    MaskShape::Linear { start, end, .. } => {
+                        let ps = map.from_t([start[0] as f64, start[1] as f64]);
+                        let pe = map.from_t([end[0] as f64, end[1] as f64]);
+                        if ps.distance(p) < 12.0 || pe.distance(p) < 12.0 {
+                            return Cursor::Icon(resize_cursor(pe - ps));
+                        }
+                        if ps.lerp(pe, 0.5).distance(p) < 12.0 {
+                            return Cursor::Icon(Move);
+                        }
+                    }
+                    MaskShape::Radial { center, radius, .. } => {
+                        let pc = map.from_t([center[0] as f64, center[1] as f64]);
+                        let pr = map.from_t([(center[0] + radius[0]) as f64, center[1] as f64]);
+                        let pb = map.from_t([center[0] as f64, (center[1] + radius[1]) as f64]);
+                        if pc.distance(p) < 12.0 {
+                            return Cursor::Icon(Move);
+                        }
+                        if pr.distance(p) < 12.0 {
+                            return Cursor::Icon(resize_cursor(pr - pc));
+                        }
+                        if pb.distance(p) < 12.0 {
+                            return Cursor::Icon(resize_cursor(pb - pc));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Cursor::Icon(match tu.mask_tool {
+                MaskTool::None if zoomed => Grab,
+                MaskTool::None => Default,
+                _ => Crosshair,
+            })
+        }
+        Tool::Remove => {
+            for sp in &doc.settings.retouch {
+                if let Some(c) = sp.points.first() {
+                    let dst = map.from_s([c[0] as f64, c[1] as f64]);
+                    let src = map.from_s([(c[0] + sp.source_offset[0]) as f64, (c[1] + sp.source_offset[1]) as f64]);
+                    if (sp.mode != RetouchMode::Remove && src.distance(p) < 12.0) || dst.distance(p) < 10.0 {
+                        return Cursor::Icon(Move);
+                    }
+                }
+            }
+            Cursor::Icon(Crosshair)
+        }
+        Tool::RedEye => Cursor::Icon(Crosshair),
+        _ if zoomed => Cursor::Icon(Grab),
+        _ => Cursor::Icon(ZoomIn),
+    }
+}
+
+/// Curved double arrow around the pointer, tangent to the crop's rotation.
+fn draw_rotate_cursor(painter: &egui::Painter, p: Pos2, corners: [Pos2; 4]) {
+    let c = corners[0].lerp(corners[2], 0.5);
+    let base = (p.y - c.y).atan2(p.x - c.x);
+    // arc centred on the crop centre, so it reads as "turn around the middle"
+    let r = 11.0;
+    let pts: Vec<Pos2> = (0..=12)
+        .map(|k| {
+            let a = base + std::f32::consts::FRAC_PI_2 + (k as f32 / 12.0 - 0.5) * 1.8;
+            p + vec2(a.cos(), a.sin()) * r - vec2(base.cos(), base.sin()) * r
+        })
+        .collect();
+    let head = |tip: Pos2, prev: Pos2| -> [Pos2; 3] {
+        let d = (tip - prev).normalized();
+        let n = vec2(-d.y, d.x);
+        [tip + d * 4.0, tip - d * 2.0 + n * 4.5, tip - d * 2.0 - n * 4.5]
+    };
+    for (w, col) in [(4.0, Color32::BLACK), (1.8, Color32::WHITE)] {
+        painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(w, col)));
+        for (a, b) in [(pts[12], pts[11]), (pts[0], pts[1])] {
+            let h = head(a, b);
+            if w > 2.0 {
+                painter.add(egui::Shape::convex_polygon(h.to_vec(), col, egui::Stroke::new(1.5, col)));
+            } else {
+                painter.add(egui::Shape::convex_polygon(h.to_vec(), col, egui::Stroke::NONE));
+            }
+        }
     }
 }
 
