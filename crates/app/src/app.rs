@@ -1595,7 +1595,7 @@ impl App {
                 ui.add_space(12.0);
                 if let Some(text) = self.workflow_text() {
                     if ui
-                        .link(RichText::new(text).size(11.5).underline().color(crate::theme::pal().text_dim))
+                        .link(RichText::new(text).size(11.5).underline().color(crate::theme::pal().link))
                         .on_hover_text("Output settings (Save image)")
                         .clicked()
                     {

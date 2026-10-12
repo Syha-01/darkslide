@@ -563,11 +563,14 @@ fn prefs_window(app: &mut App, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             ui.label("Theme");
             let before = app.prefs.theme;
-            egui::ComboBox::from_id_salt("theme").selected_text(crate::theme::NAMES[app.prefs.theme.min(1) as usize]).show_ui(ui, |ui| {
-                for (i, n) in crate::theme::NAMES.iter().enumerate() {
-                    ui.selectable_value(&mut app.prefs.theme, i as u8, *n);
-                }
-            });
+            egui::ComboBox::from_id_salt("theme").selected_text(crate::theme::NAMES[(app.prefs.theme as usize).min(crate::theme::NAMES.len() - 1)]).show_ui(
+                ui,
+                |ui| {
+                    for (i, n) in crate::theme::NAMES.iter().enumerate() {
+                        ui.selectable_value(&mut app.prefs.theme, i as u8, *n);
+                    }
+                },
+            );
             if app.prefs.theme != before {
                 crate::theme::set(ctx, app.prefs.theme);
             }

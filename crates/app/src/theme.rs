@@ -30,7 +30,7 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// Interface greys. The two variants follow Photoshop's Dark (default) and
+/// Interface greys: our near-black default, plus Photoshop's Dark and
 /// Darkest themes, which Camera Raw inherits.
 pub struct Palette {
     /// Behind the image.
@@ -56,11 +56,36 @@ pub struct Palette {
     pub text: Color32,
     pub text_dim: Color32,
     pub text_muted: Color32,
+    /// Clickable text such as the workflow line.
+    pub link: Color32,
 }
 
 const fn g(v: u8) -> Color32 {
     Color32::from_rgb(v, v, v)
 }
+
+pub const CLASSIC: Palette = Palette {
+    canvas: g(18),
+    panel: g(32),
+    bar: g(26),
+    filmstrip: g(26),
+    well: g(22),
+    input: g(18),
+    input_hover: g(26),
+    button: g(42),
+    button_hover: g(54),
+    header_hover: g(40),
+    divider: g(42),
+    border: g(52),
+    border_strong: g(72),
+    track: g(70),
+    notch: g(95),
+    grid: g(55),
+    text: g(222),
+    text_dim: g(190),
+    text_muted: g(120),
+    link: Color32::from_rgb(20, 115, 230),
+};
 
 pub const DARK: Palette = Palette {
     canvas: g(40),
@@ -82,6 +107,7 @@ pub const DARK: Palette = Palette {
     text: g(235),
     text_dim: g(200),
     text_muted: g(165),
+    link: g(200),
 };
 
 pub const DARKEST: Palette = Palette {
@@ -104,22 +130,24 @@ pub const DARKEST: Palette = Palette {
     text: g(225),
     text_dim: g(185),
     text_muted: g(135),
+    link: g(185),
 };
 
 static THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
-pub const NAMES: [&str; 2] = ["Dark (Camera Raw default)", "Darkest"];
+pub const NAMES: [&str; 3] = ["Classic", "Camera Raw grey", "Camera Raw darkest"];
 
 pub fn pal() -> &'static Palette {
     match THEME.load(std::sync::atomic::Ordering::Relaxed) {
-        1 => &DARKEST,
-        _ => &DARK,
+        1 => &DARK,
+        2 => &DARKEST,
+        _ => &CLASSIC,
     }
 }
 
 /// Switch palettes and restyle.
 pub fn set(ctx: &egui::Context, theme: u8) {
-    THEME.store(theme.min(1), std::sync::atomic::Ordering::Relaxed);
+    THEME.store(theme.min(NAMES.len() as u8 - 1), std::sync::atomic::Ordering::Relaxed);
     visuals(ctx);
 }
 
