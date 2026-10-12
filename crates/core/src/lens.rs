@@ -3,7 +3,7 @@
 
 use rayon::prelude::*;
 
-use crate::image::Image3;
+use crate::image::{Image3, Plane};
 use crate::params::LensCorrection;
 use crate::pipeline::geometry::LensModel;
 
@@ -53,68 +53,161 @@ pub fn model_for(lc: &LensCorrection, profile: Option<&LensProfile>, auto_ca: Op
     m
 }
 
-/// Estimate lateral CA as radial scale factors of R and B relative to G by
-/// maximising gradient alignment along radial directions.
+/// Estimate lateral CA as radial scale factors of R and B relative to G. Each
+/// strong radial edge gives a sub-pixel shift (normalised correlation of the
+/// channel's radial profile against G, so edge colour doesn't bias it); a
+/// robust fit of shift = scale * radius over all edges gives the scale.
 pub fn estimate_lateral_ca(img: &Image3) -> [f64; 2] {
-    let f = (img.w.max(img.h) / 1600).max(1);
+    let f = (img.w.max(img.h) / 2000).max(1);
     let s = img.downscale_int(f);
     let (w, h) = (s.w, s.h);
-    let g = s.channel(1).map(|v| v.max(0.0).sqrt());
-    let cx = w as f64 / 2.0;
-    let cy = h as f64 / 2.0;
+    let enc = |c: usize| s.channel(c).map(|v| v.max(0.0).sqrt());
+    let g = enc(1);
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
     let rmax = (cx * cx + cy * cy).sqrt();
-    // sample edge pixels in the outer image area
-    let mut pts = vec![];
-    let step = 3;
-    for y in (2..h - 2).step_by(step) {
-        for x in (2..w - 2).step_by(step) {
-            let dx = x as f64 - cx;
-            let dy = y as f64 - cy;
-            let r = (dx * dx + dy * dy).sqrt() / rmax;
-            if r < 0.45 {
-                continue;
-            }
-            let gx = g.get(x + 1, y) - g.get(x - 1, y);
-            let gy = g.get(x, y + 1) - g.get(x, y - 1);
-            // radial gradient component
-            let rad = (gx as f64 * dx + gy as f64 * dy) / (r * rmax);
-            if rad.abs() > 0.04 {
-                pts.push((x, y));
-            }
-        }
-    }
-    if pts.len() < 200 {
+    const HALF: i32 = 6;
+    const MAXD: f32 = 3.0;
+    let margin = (HALF as f32 + MAXD + 2.0) as usize;
+    // strongest radial edges away from the centre, where CA is measurable
+    let mut pts: Vec<(f32, usize, usize)> = (margin..h.saturating_sub(margin))
+        .into_par_iter()
+        .step_by(2)
+        .flat_map_iter(|y| {
+            let g = &g;
+            (margin..w.saturating_sub(margin)).step_by(2).filter_map(move |x| {
+                let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                let r = (dx * dx + dy * dy).sqrt();
+                if r < 0.3 * rmax {
+                    return None;
+                }
+                let gx = g.get(x + 1, y) - g.get(x - 1, y);
+                let gy = g.get(x, y + 1) - g.get(x, y - 1);
+                let rad = (gx * dx + gy * dy) / r;
+                // mostly radial edges: tangential ones carry no radial shift
+                (rad.abs() > 0.03 && rad * rad > 0.6 * (gx * gx + gy * gy)).then_some((rad.abs(), x, y))
+            })
+        })
+        .collect();
+    if pts.len() < 100 {
         return [0.0, 0.0];
     }
-    let mut out = [0.0; 2];
-    for (k, ch) in [0usize, 2].iter().enumerate() {
-        let c = s.channel(*ch).map(|v| v.max(0.0).sqrt());
-        let mut best = (f64::MAX, 0.0);
-        let mut sc = -0.004;
-        while sc <= 0.0041 {
-            let err: f64 = pts
-                .par_iter()
-                .map(|&(x, y)| {
-                    let dx = x as f64 + 0.5 - cx;
-                    let dy = y as f64 + 0.5 - cy;
-                    let sx = cx + dx * (1.0 + sc);
-                    let sy = cy + dy * (1.0 + sc);
-                    let cv = c.sample_bilinear(sx as f32, sy as f32);
-                    let gv = g.get(x, y);
-                    // compare after normalising local level
-                    let d = (cv - gv) as f64;
-                    d * d
-                })
-                .sum();
-            // remove a global colour offset bias by comparing against the mean diff
-            if err < best.0 {
-                best = (err, sc);
-            }
-            sc += 0.0002;
+    pts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    pts.truncate(30_000);
+    let profile = |p: &Plane, x: f32, y: f32, ux: f32, uy: f32, d: f32| -> [f32; (2 * HALF + 1) as usize] {
+        let mut o = [0.0; (2 * HALF + 1) as usize];
+        for (k, t) in (-HALF..=HALF).enumerate() {
+            let t = t as f32 + d;
+            o[k] = p.sample_bilinear(x + ux * t, y + uy * t);
         }
-        out[k] = best.1;
+        o
+    };
+    let ncc = |a: &[f32], b: &[f32]| -> f32 {
+        let n = a.len() as f32;
+        let (ma, mb) = (a.iter().sum::<f32>() / n, b.iter().sum::<f32>() / n);
+        let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+        for (x, y) in a.iter().zip(b) {
+            let (x, y) = (x - ma, y - mb);
+            sab += x * y;
+            saa += x * x;
+            sbb += y * y;
+        }
+        if saa < 1e-8 || sbb < 1e-8 { -1.0 } else { sab / (saa * sbb).sqrt() }
+    };
+    let mut out = [0.0; 2];
+    for (k, ch) in [0usize, 2].into_iter().enumerate() {
+        let c = enc(ch);
+        // (radius, unit dir, shift) per edge
+        let obs: Vec<(f32, f32, f32, f32)> = pts
+            .par_iter()
+            .filter_map(|&(_, x, y)| {
+                let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (dx, dy) = (x - cx, y - cy);
+                let r = (dx * dx + dy * dy).sqrt();
+                let (ux, uy) = (dx / r, dy / r);
+                let gp = profile(&g, x, y, ux, uy, 0.0);
+                let score = |d: f32| ncc(&gp, &profile(&c, x, y, ux, uy, d));
+                let mut best = (-2.0, 0.0);
+                let mut d = -MAXD;
+                while d <= MAXD + 1e-3 {
+                    let v = score(d);
+                    if v > best.0 {
+                        best = (v, d);
+                    }
+                    d += 0.25;
+                }
+                if best.0 < 0.9 || best.1.abs() >= MAXD {
+                    return None;
+                }
+                // parabolic refinement around the best step
+                let (a, b, cc) = (score(best.1 - 0.25), best.0, score(best.1 + 0.25));
+                let den = a - 2.0 * b + cc;
+                // soft (defocused) edges correlate at any shift; they only add noise
+                if den > -0.004 {
+                    return None;
+                }
+                let off = (0.5 * (a - cc) / den).clamp(-0.5, 0.5) * 0.25;
+                Some((r, ux, uy, best.1 + off))
+            })
+            .collect();
+        if obs.len() < 50 {
+            continue;
+        }
+        // shift = scale * r + (tx, ty) . u: the translation soaks up channel
+        // offsets from demosaicing (X-Trans drafts) that aren't lens CA
+        let fit = |o: &[(f32, f32, f32, f32)]| -> Option<[f64; 3]> {
+            let mut a = [[0.0f64; 3]; 3];
+            let mut v = [0.0f64; 3];
+            for &(r, ux, uy, s) in o {
+                let row = [r as f64 / rmax as f64, ux as f64, uy as f64];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        a[i][j] += row[i] * row[j];
+                    }
+                    v[i] += row[i] * s as f64;
+                }
+            }
+            solve3(a, v)
+        };
+        let resid =
+            |p: &[f64; 3], &(r, ux, uy, s): &(f32, f32, f32, f32)| (s as f64 - p[0] * r as f64 / rmax as f64 - p[1] * ux as f64 - p[2] * uy as f64).abs();
+        let mut keep = obs;
+        let mut sc = 0.0f64;
+        for _ in 0..4 {
+            let Some(p) = fit(&keep) else { break };
+            sc = p[0] / rmax as f64;
+            let mut res: Vec<f64> = keep.iter().map(|o| resid(&p, o)).collect();
+            res.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mad = res[res.len() / 2].max(0.02);
+            let next: Vec<_> = keep.iter().copied().filter(|o| resid(&p, o) <= 2.5 * mad).collect();
+            if next.len() < 50 {
+                break;
+            }
+            keep = next;
+        }
+        out[k] = sc.clamp(-0.01, 0.01);
     }
     out
+}
+
+/// Cramer's rule; None when singular.
+fn solve3(a: [[f64; 3]; 3], v: [f64; 3]) -> Option<[f64; 3]> {
+    let det = |m: &[[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let d = det(&a);
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let mut out = [0.0; 3];
+    for (k, o) in out.iter_mut().enumerate() {
+        let mut m = a;
+        for i in 0..3 {
+            m[i][k] = v[i];
+        }
+        *o = det(&m) / d;
+    }
+    Some(out)
 }
 
 /// Vignette gain from a profile at normalised radius r.
@@ -477,6 +570,38 @@ pub fn lcp_profile(entries: &[LcpEntry], lens: &str, focal: f64, w: f64, h: f64)
 #[cfg(test)]
 mod lcp_tests {
     use super::*;
+
+    #[test]
+    fn finds_injected_lateral_ca() {
+        // random hard-edged coloured discs, so edge colour can't bias the fit;
+        // R and B are sampled at a radially scaled position
+        let (w, h) = (1200usize, 800usize);
+        let mut seed = 7u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f32 / (1u64 << 31) as f32
+        };
+        let discs: Vec<(f32, f32, f32, [f32; 3])> = (0..300).map(|_| (rnd() * w as f32, rnd() * h as f32, 8.0 + rnd() * 40.0, [rnd(), rnd(), rnd()])).collect();
+        let scene = |x: f32, y: f32| -> [f32; 3] {
+            let mut c = [0.2, 0.2, 0.2];
+            for &(dx, dy, r, col) in &discs {
+                if (x - dx).powi(2) + (y - dy).powi(2) < r * r {
+                    c = col;
+                }
+            }
+            c
+        };
+        let (sr, sb) = (0.0015f32, -0.001f32);
+        let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+        let img = Image3::from_fn(w, h, |x, y| {
+            let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+            let at = |s: f32| scene(cx + (x - cx) * (1.0 + s), cy + (y - cy) * (1.0 + s));
+            [at(sr)[0], scene(x, y)[1], at(sb)[2]]
+        });
+        let est = estimate_lateral_ca(&img);
+        // the correction undoes the injected scale
+        assert!((est[0] + sr as f64).abs() < 0.0003 && (est[1] + sb as f64).abs() < 0.0003, "{est:?}");
+    }
 
     #[test]
     fn parses_lcp() {
