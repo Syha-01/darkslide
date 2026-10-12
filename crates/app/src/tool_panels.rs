@@ -120,6 +120,10 @@ pub struct ToolUi {
     pub new_preset_name: String,
     pub new_preset_group: String,
     pub snapshot_name: String,
+    pub snapshot_renaming: Option<(usize, String)>,
+    pub snapshot_rename_focus: bool,
+    /// The last deleted snapshot, for its Undo button.
+    pub snapshot_deleted: Option<(u64, usize, String, DevelopSettings)>,
     pub mask_grading_view: u8,
     pub mask_point_sel: usize,
     pub request_ai: Option<(usize, AiMaskKind)>,
@@ -164,6 +168,9 @@ impl Default for ToolUi {
             new_preset_name: String::new(),
             new_preset_group: String::new(),
             snapshot_name: String::new(),
+            snapshot_renaming: None,
+            snapshot_rename_focus: false,
+            snapshot_deleted: None,
             mask_grading_view: 0,
             mask_point_sel: 0,
             request_ai: None,
@@ -566,35 +573,121 @@ pub fn redeye_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
     });
 }
 
+/// "Snapshot 4" after the highest numbered one, so deleting never repeats a name.
+fn next_snapshot_name(snaps: &[(String, DevelopSettings)]) -> String {
+    let n = snaps.iter().filter_map(|(name, _)| name.strip_prefix("Snapshot ")?.trim().parse::<u32>().ok()).max().unwrap_or(0);
+    format!("Snapshot {}", n + 1)
+}
+
 pub fn snapshots_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
-    ui.heading("Snapshots");
-    ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut t.snapshot_name).hint_text("Snapshot name").desired_width(150.0));
-        if ui.button("+ Create").clicked() {
-            let name = if t.snapshot_name.trim().is_empty() { format!("Snapshot {}", doc.snapshots.len() + 1) } else { t.snapshot_name.trim().to_string() };
-            doc.snapshots.push((name, doc.settings.clone()));
-            t.snapshot_name.clear();
-            doc.dirty = true;
+    let p = crate::theme::pal();
+    ui.label(RichText::new("Snapshots").size(16.0).strong());
+    ui.add_space(6.0);
+    // create: the field takes what the button leaves; Enter creates too
+    let mut create = false;
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 26.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if ui.add(egui::Button::new(format!("{}  Create", ic::PLUS)).min_size(egui::vec2(0.0, 26.0))).on_hover_text("Save the current settings as a snapshot").clicked() {
+            create = true;
+        }
+        let r = ui.add(egui::TextEdit::singleline(&mut t.snapshot_name).hint_text(next_snapshot_name(&doc.snapshots)).desired_width(ui.available_width()).margin(egui::vec2(8.0, 5.0)));
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            create = true;
         }
     });
-    ui.separator();
+    if create {
+        let name = if t.snapshot_name.trim().is_empty() { next_snapshot_name(&doc.snapshots) } else { t.snapshot_name.trim().to_string() };
+        doc.snapshots.push((name, doc.settings.clone()));
+        t.snapshot_name.clear();
+        t.snapshot_deleted = None;
+        doc.dirty = true;
+    }
+    ui.add_space(6.0);
+
     let mut remove = None;
     let mut apply = None;
     let mut update = None;
-    for (i, (name, _)) in doc.snapshots.iter().enumerate() {
-        ui.horizontal(|ui| {
-            if ui.button(name).on_hover_text("Apply snapshot").clicked() {
+    let w = ui.available_width();
+    for i in 0..doc.snapshots.len() {
+        let active = doc.snapshots[i].1 == doc.settings;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, &doc.snapshots[i].0));
+        let icons_w = 3.0 * 24.0 + 4.0;
+        let name_r = egui::Rect::from_min_max(rect.min + egui::vec2(10.0, 0.0), egui::pos2(rect.right() - icons_w, rect.bottom()));
+        if active {
+            ui.painter().rect_filled(rect, 4.0, p.button);
+            ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), 1.5, widgets::ACCENT);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(rect, 4.0, p.header_hover);
+        }
+        if t.snapshot_renaming.as_ref().is_some_and(|(k, _)| *k == i) {
+            let (_, text) = t.snapshot_renaming.as_mut().unwrap();
+            let r = ui.put(name_r.shrink2(egui::vec2(0.0, 3.0)), egui::TextEdit::singleline(text).margin(egui::vec2(4.0, 2.0)));
+            if std::mem::take(&mut t.snapshot_rename_focus) {
+                // start with the whole name selected, so typing replaces it
+                r.request_focus();
+                let mut st = egui::text_edit::TextEditState::load(ui.ctx(), r.id).unwrap_or_default();
+                st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()))));
+                st.store(ui.ctx(), r.id);
+            }
+            if r.lost_focus() {
+                let (k, text) = t.snapshot_renaming.take().unwrap();
+                // Esc keeps the old name
+                if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && !text.trim().is_empty() {
+                    doc.snapshots[k].0 = text.trim().to_string();
+                    doc.dirty = true;
+                }
+            }
+        } else {
+            // long names end in an ellipsis; the row never widens the panel
+            let col = if active { p.text } else { p.text_dim };
+            let mut job = egui::text::LayoutJob::simple_singleline(doc.snapshots[i].0.clone(), egui::FontId::proportional(13.0), col);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(name_r.width());
+            let galley = ui.painter().layout_job(job);
+            let pos = egui::pos2(name_r.left(), name_r.center().y - galley.size().y / 2.0);
+            let elided = galley.elided;
+            ui.painter().galley(pos, galley, col);
+            let tip = if active { "Current settings match this snapshot" } else { "Click to apply, double-click to rename" };
+            let resp = if elided { resp.on_hover_text(format!("{}\n{tip}", doc.snapshots[i].0)) } else { resp.on_hover_text(tip) };
+            if resp.double_clicked() {
+                t.snapshot_renaming = Some((i, doc.snapshots[i].0.clone()));
+                t.snapshot_rename_focus = true;
+            } else if resp.clicked() {
                 apply = Some(i);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(ic::TRASH).clicked() {
-                    remove = Some(i);
+            resp.context_menu(|ui| {
+                if ui.button(format!("{}  Apply", ic::CHECK)).clicked() {
+                    apply = Some(i);
+                    ui.close();
                 }
-                if ui.small_button(ic::ARROWS_CLOCKWISE).on_hover_text("Update with current settings").clicked() {
+                if ui.button(format!("{}  Rename", ic::PENCIL_SIMPLE)).clicked() {
+                    t.snapshot_renaming = Some((i, doc.snapshots[i].0.clone()));
+                    t.snapshot_rename_focus = true;
+                    ui.close();
+                }
+                if ui.button(format!("{}  Update with current settings", ic::ARROWS_CLOCKWISE)).clicked() {
                     update = Some(i);
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(format!("{}  Delete", ic::TRASH)).clicked() {
+                    remove = Some(i);
+                    ui.close();
                 }
             });
-        });
+        }
+        // fixed icon slot on the right
+        let icon = |k: f32| egui::Rect::from_center_size(egui::pos2(rect.right() - 14.0 - k * 24.0, rect.center().y), egui::vec2(22.0, 22.0));
+        if ui.put(icon(0.0), egui::Button::new(ic::TRASH).frame(false)).on_hover_text("Delete snapshot").clicked() {
+            remove = Some(i);
+        }
+        if ui.put(icon(1.0), egui::Button::new(ic::ARROWS_CLOCKWISE).frame(false)).on_hover_text("Update with current settings").clicked() {
+            update = Some(i);
+        }
+        if ui.put(icon(2.0), egui::Button::new(ic::PENCIL_SIMPLE).frame(false)).on_hover_text("Rename").clicked() {
+            t.snapshot_renaming = Some((i, doc.snapshots[i].0.clone()));
+            t.snapshot_rename_focus = true;
+        }
+        ui.add_space(2.0);
     }
     if let Some(i) = apply {
         doc.settings = doc.snapshots[i].1.clone();
@@ -604,11 +697,30 @@ pub fn snapshots_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
         doc.dirty = true;
     }
     if let Some(i) = remove {
-        doc.snapshots.remove(i);
+        let (name, s) = doc.snapshots.remove(i);
+        t.snapshot_deleted = Some((doc.id, i, name, s));
+        t.snapshot_renaming = None;
         doc.dirty = true;
     }
     if doc.snapshots.is_empty() {
-        ui.label(RichText::new("No snapshots yet.").weak());
+        ui.add_space(6.0);
+        ui.label(RichText::new("No snapshots yet. A snapshot keeps the current settings so you can come back to them.").size(12.0).color(p.text_muted));
+    }
+    // deleting can be taken back until the next snapshot change
+    if let Some((id, i, name, _)) = &t.snapshot_deleted
+        && *id == doc.id
+    {
+        let (i, name) = (*i, name.clone());
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(RichText::new(format!("Deleted “{name}”")).size(12.0).color(p.text_muted)).truncate());
+            if ui.small_button(format!("{}  Undo", ic::ARROW_COUNTER_CLOCKWISE)).clicked()
+                && let Some((_, _, name, s)) = t.snapshot_deleted.take()
+            {
+                doc.snapshots.insert(i.min(doc.snapshots.len()), (name, s));
+                doc.dirty = true;
+            }
+        });
     }
 }
 
