@@ -1,0 +1,31 @@
+[package]
+name = "darkslide-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rawler = "0.8"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp", "exr"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = "0.38"
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+base64 = "0.22"
+tiff = "0.11"
+memchr = "2"
+ravif = { version = "0.13", default-features = false, features = ["threading"], optional = true }
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "load-dynamic", "api-20"] }
+
+[features]
+default = ["avif"]
+# AVIF export (pure-Rust AV1 encoder; slow to compile)
+avif = ["dep:ravif"]
+# ONNX Runtime models for masks / depth (libonnxruntime.so loaded at runtime)
+ml = ["dep:ort"]
+
+[dev-dependencies]
+env_logger = "0.11"

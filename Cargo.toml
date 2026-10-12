@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+debug = 1
+
+# rawler relies on wrapping index arithmetic (e.g. Markesteijn's CFA lookups)
+[profile.dev.package.rawler]
+overflow-checks = false

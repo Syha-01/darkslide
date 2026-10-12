@@ -1,0 +1,34 @@
+# Flatpak manifest. Generate cargo-sources.json first:
+#   python3 flatpak-cargo-generator.py ../Cargo.lock -o cargo-sources.json
+app-id: org.darkslide.Darkslide
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: darkslide
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+  - --filesystem=xdg-pictures
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/darkslide/cargo
+modules:
+  - name: darkslide
+    buildsystem: simple
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml
+      - cargo --offline build --release
+      - install -Dm755 target/release/darkslide /app/bin/darkslide
+      - install -Dm644 packaging/darkslide.desktop /app/share/applications/org.darkslide.Darkslide.desktop
+      - sed -i 's/^Icon=.*/Icon=org.darkslide.Darkslide/' /app/share/applications/org.darkslide.Darkslide.desktop
+      - install -Dm644 packaging/darkslide.svg /app/share/icons/hicolor/scalable/apps/org.darkslide.Darkslide.svg
+    sources:
+      - type: dir
+        path: ..
+      - cargo-sources.json
