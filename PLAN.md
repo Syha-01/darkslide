@@ -381,7 +381,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 
 ### Phase 10 — Performance & polish
 - [ ] wgpu compute pipeline for interactive stages
-- [ ] Thumbnail/preview cache on disk
+- [x] Thumbnail cache on disk (~/.cache/darkslide/thumbs; refreshed from edited renders)
 - [x] DNG export (rawler convert), embedded XMP read
 - [x] Packaging: `.desktop`, icon, scripts/install.sh, Flatpak manifest template
 - [x] Optional ONNX (`ort`, load-dynamic) backend: subject/sky/objects/depth

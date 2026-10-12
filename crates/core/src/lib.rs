@@ -24,6 +24,7 @@ pub mod pipeline;
 pub mod profiles;
 pub mod redeye;
 pub mod retouch;
+pub mod thumbcache;
 pub mod upright;
 pub mod xmp;
 pub mod xmp_masks;

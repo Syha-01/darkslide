@@ -85,6 +85,8 @@ pub struct App {
     pub before_tex: Option<Tex>,
     pub mask_tex: Option<Tex>,
     pub fit_rgba: Option<(Vec<u8>, usize, usize)>,
+    /// Edited thumbnail waiting to be written to the disk cache.
+    thumb_save: Option<(std::time::Instant, PathBuf, image::RgbImage)>,
     pub hist: Option<Histogram>,
     pub scope: Option<Vec<u32>>,
     pub render_ms: u128,
@@ -145,6 +147,7 @@ impl App {
             before_tex: None,
             mask_tex: None,
             fit_rgba: None,
+            thumb_save: None,
             hist: None,
             scope: None,
             render_ms: 0,
@@ -285,7 +288,8 @@ impl App {
                     }
                 }
                 Loaded::Thumb(id, img) => {
-                    if let (Some(d), Some(img)) = (self.docs.iter_mut().find(|d| d.id == id), img) {
+                    // don't replace a thumbnail already taken from the edited render
+                    if let (Some(d), Some(img)) = (self.docs.iter_mut().find(|d| d.id == id && d.thumb.is_none()), img) {
                         let ci = egui::ColorImage::from_rgb([img.width() as usize, img.height() as usize], img.as_raw());
                         d.thumb = Some(ctx.load_texture(format!("thumb{id}"), ci, egui::TextureOptions::LINEAR));
                     }
@@ -294,6 +298,14 @@ impl App {
         }
         while let Ok(out) = self.worker.rx.try_recv() {
             self.accept(ctx, out);
+        }
+        if let Some((at, ..)) = &self.thumb_save {
+            let wait = std::time::Duration::from_secs(1);
+            if at.elapsed() >= wait {
+                self.flush_thumb();
+            } else {
+                ctx.request_repaint_after(wait);
+            }
         }
         // finished distraction detections
         let found: Vec<(u64, Option<darkslide_core::params::RetouchSpot>)> = std::mem::take(&mut *self.distract_jobs.lock().unwrap());
@@ -383,7 +395,35 @@ impl App {
             } else {
                 self.mask_tex = None;
             }
+            if !out.ignore_crop {
+                self.refresh_thumb(ctx, &out.rgba, out.w, out.h);
+            }
             self.fit_rgba = Some((out.rgba, out.w, out.h));
+        }
+    }
+
+    /// Filmstrip thumbnail from the edited render; cached once edits settle.
+    fn refresh_thumb(&mut self, ctx: &egui::Context, rgba: &[u8], w: usize, h: usize) {
+        let Some(src) = image::RgbaImage::from_raw(w as u32, h as u32, rgba.to_vec()) else { return };
+        let t = image::DynamicImage::ImageRgba8(src).thumbnail(256, 256).to_rgb8();
+        let Some(d) = self.doc_mut() else { return };
+        let ci = egui::ColorImage::from_rgb([t.width() as usize, t.height() as usize], t.as_raw());
+        match &mut d.thumb {
+            Some(tex) => tex.set(ci, egui::TextureOptions::LINEAR),
+            None => d.thumb = Some(ctx.load_texture(format!("thumb{}", d.id), ci, egui::TextureOptions::LINEAR)),
+        }
+        let path = d.path.clone();
+        if let Some((_, p, _)) = &self.thumb_save
+            && *p != path
+        {
+            self.flush_thumb();
+        }
+        self.thumb_save = Some((std::time::Instant::now(), path, t));
+    }
+
+    fn flush_thumb(&mut self) {
+        if let Some((_, p, t)) = self.thumb_save.take() {
+            std::thread::spawn(move || darkslide_core::thumbcache::put(&p, &t));
         }
     }
 
@@ -1554,6 +1594,9 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        if let Some((_, p, t)) = self.thumb_save.take() {
+            darkslide_core::thumbcache::put(&p, &t);
+        }
         let autosave = self.prefs.autosave_sidecars;
         for d in self.docs.iter_mut() {
             if d.dirty && autosave {

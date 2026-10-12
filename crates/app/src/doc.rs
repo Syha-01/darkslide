@@ -287,7 +287,7 @@ impl Loader {
             .name("thumbs".into())
             .spawn(move || {
                 while let Ok((id, path)) = trx.recv() {
-                    let t = darkslide_core::decode::load_thumbnail(&path, 256).ok();
+                    let t = darkslide_core::thumbcache::load(&path, 256).ok();
                     let _ = otx2.send(Loaded::Thumb(id, t));
                     ctx2.request_repaint();
                 }
