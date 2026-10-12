@@ -96,6 +96,8 @@ pub struct ToolUi {
     pub spot_feather: f32,
     pub spot_opacity: f32,
     pub selected_spot: Option<usize>,
+    /// The spot whose settings the panel last loaded.
+    pub spot_loaded: Option<usize>,
     pub visualize_spots: bool,
     pub visualize_threshold: f32,
     pub show_spot_overlay: bool,
@@ -135,11 +137,12 @@ impl Default for ToolUi {
             straighten: false,
             angle_base: None,
             crop_note: None,
-            remove_mode: RetouchMode::Heal,
+            remove_mode: RetouchMode::Remove,
             spot_size: 0.012,
             spot_feather: 30.0,
             spot_opacity: 100.0,
             selected_spot: None,
+            spot_loaded: None,
             visualize_spots: false,
             visualize_threshold: 50.0,
             show_spot_overlay: true,
@@ -422,55 +425,93 @@ pub fn fit_crop_inside(s: &mut DevelopSettings, engine: &darkslide_core::Engine)
 }
 
 pub fn remove_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, actions: &mut Vec<edit_panel::Action>) {
+    let engine = doc.engine.clone();
     let s = &mut doc.settings;
     ui.heading("Remove");
+    // a newly selected spot shows its own settings, which the controls then edit
+    let sel = t.selected_spot.filter(|&i| i < s.retouch.len());
+    if sel != t.spot_loaded {
+        if let Some(sp) = sel.map(|i| &s.retouch[i]) {
+            t.remove_mode = sp.mode;
+            t.spot_size = sp.radius;
+            t.spot_feather = sp.feather;
+            t.spot_opacity = sp.opacity;
+        }
+        t.spot_loaded = sel;
+    }
+    let mode_before = t.remove_mode;
     ui.horizontal(|ui| {
         ui.selectable_value(&mut t.remove_mode, RetouchMode::Remove, "Remove").on_hover_text("Content-aware fill");
-        ui.selectable_value(&mut t.remove_mode, RetouchMode::Heal, "Heal");
-        ui.selectable_value(&mut t.remove_mode, RetouchMode::Clone, "Clone");
+        ui.selectable_value(&mut t.remove_mode, RetouchMode::Heal, "Heal").on_hover_text("Blend in texture from a source area");
+        ui.selectable_value(&mut t.remove_mode, RetouchMode::Clone, "Clone").on_hover_text("Copy a source area exactly");
     });
+    let resource = |sp: &mut RetouchSpot| {
+        if sp.mode != RetouchMode::Remove
+            && let Some(e) = &engine
+        {
+            sp.source_offset = darkslide_core::retouch::find_source(&e.base(darkslide_core::demosaic::Quality::Draft), sp);
+        }
+    };
+    if t.remove_mode != mode_before
+        && let Some(sp) = sel.map(|i| &mut s.retouch[i])
+    {
+        let had_source = sp.mode != RetouchMode::Remove;
+        sp.mode = t.remove_mode;
+        if !had_source {
+            resource(sp);
+        }
+    }
     let mut size = t.spot_size * 1000.0;
     if slider(ui, &mut size, SliderSpec::new("Size", 1.0, 200.0, 12.0)) {
         t.spot_size = size / 1000.0;
-        if let Some(i) = t.selected_spot {
-            if let Some(sp) = s.retouch.get_mut(i) {
-                sp.radius = t.spot_size;
+        if let Some(sp) = sel.map(|i| &mut s.retouch[i]) {
+            sp.radius = t.spot_size;
+            // a grown spot can't take from where it now overlaps
+            let d = (sp.source_offset[0].powi(2) + sp.source_offset[1].powi(2)).sqrt();
+            if sp.mode != RetouchMode::Remove && d < sp.radius * 2.2 {
+                resource(sp);
             }
         }
     }
     if slider(ui, &mut t.spot_feather, SliderSpec::new("Feather", 0.0, 100.0, 30.0)) {
-        if let Some(sp) = t.selected_spot.and_then(|i| s.retouch.get_mut(i)) {
+        if let Some(sp) = sel.map(|i| &mut s.retouch[i]) {
             sp.feather = t.spot_feather;
         }
     }
     if slider(ui, &mut t.spot_opacity, SliderSpec::new("Opacity", 0.0, 100.0, 100.0)) {
-        if let Some(sp) = t.selected_spot.and_then(|i| s.retouch.get_mut(i)) {
+        if let Some(sp) = sel.map(|i| &mut s.retouch[i]) {
             sp.opacity = t.spot_opacity;
         }
     }
+    ui.label(
+        RichText::new(if sel.is_some() { "Editing the selected spot · Esc deselects" } else { "Settings for the next spot" })
+            .small()
+            .weak(),
+    );
     ui.add_space(4.0);
-    ui.checkbox(&mut t.visualize_spots, "Visualize spots");
-    if t.visualize_spots {
-        slider(ui, &mut t.visualize_threshold, SliderSpec::new("Threshold", 0.0, 100.0, 50.0));
-    }
+    ui.checkbox(&mut t.visualize_spots, "Visualize spots").on_hover_text("Show the photo as edges to find dust");
+    // always there, so ticking the box doesn't push the panel down
+    ui.add_enabled_ui(t.visualize_spots, |ui| slider(ui, &mut t.visualize_threshold, SliderSpec::new("Threshold", 0.0, 100.0, 50.0)));
     ui.checkbox(&mut t.show_spot_overlay, "Show overlay");
     ui.add_space(4.0);
-    ui.label(format!("{} spot(s)", s.retouch.len()));
+    let n = s.retouch.len();
+    ui.label(RichText::new(if n == 1 { "1 spot".to_string() } else { format!("{n} spots") }).weak());
     ui.horizontal(|ui| {
-        if let Some(i) = t.selected_spot {
-            if ui.button(format!("{}  Delete spot", ic::TRASH)).clicked() && i < s.retouch.len() {
+        if ui.add_enabled(sel.is_some(), egui::Button::new(format!("{}  Delete spot", ic::TRASH))).on_hover_text("Delete").clicked() {
+            if let Some(i) = sel {
                 s.retouch.remove(i);
                 t.selected_spot = None;
             }
         }
-        if ui.button("Clear all").clicked() {
+        if ui.add_enabled(n > 0, egui::Button::new("Clear all")).clicked() {
             s.retouch.clear();
             t.selected_spot = None;
         }
     });
+    ui.add_space(4.0);
     ui.label(RichText::new("Distraction removal").strong());
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Dust spots").clicked() {
+        if ui.button("Dust spots").on_hover_text("Find sensor dust and heal it").clicked() {
             actions.push(edit_panel::Action::DetectDust);
         }
         if ui.button("People").on_hover_text("Detect and remove people").clicked() {
@@ -480,7 +521,8 @@ pub fn remove_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, actions: &
             actions.push(edit_panel::Action::RemoveWires);
         }
     });
-    ui.label(RichText::new("Click or paint over a blemish. Drag a heal/clone source to move it. Del removes the selected spot.").weak().small());
+    ui.add_space(4.0);
+    ui.label(RichText::new("Click or paint over a blemish. Drag a spot or its source to move it.").weak().small());
 }
 
 pub fn redeye_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {

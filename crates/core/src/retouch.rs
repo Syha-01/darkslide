@@ -248,13 +248,17 @@ pub fn detect_dust(img: &Image3, max_spots: usize) -> Vec<RetouchSpot> {
     let bg = gaussian_blur(&l, 6.0);
     let fine = gaussian_blur(&l, 1.0);
     let tex = gaussian_blur(&l.zip_map(&fine, |a, b| (a - b).abs()), 6.0);
+    // texture over a wider area: water, fabric and foliage are busy, dusty sky isn't
+    let busy = gaussian_blur(&l.zip_map(&gaussian_blur(&l, 2.0), |a, b| (a - b).abs()), 12.0);
     let mut cands: Vec<(f32, usize, usize)> = vec![];
     let (w, h) = (s.w, s.h);
     for y in 4..h.saturating_sub(4) {
         for x in 4..w.saturating_sub(4) {
             let i = y * w + x;
             let d = bg.data[i] - fine.data[i];
-            if d > 0.08 && tex.data[i] < 0.03 {
+            // clearly darker than the surroundings, above the local noise, and not in
+            // the shadows, where noise looks like dust
+            if d > 0.12 && tex.data[i] < 0.03 && d > tex.data[i] * 5.0 && d > busy.data[i] * 6.0 && bg.data[i] > -4.5 {
                 // local maximum of darkness
                 let mut is_max = true;
                 'o: for dy in -2isize..=2 {
@@ -266,12 +270,21 @@ pub fn detect_dust(img: &Image3, max_spots: usize) -> Vec<RetouchSpot> {
                         }
                     }
                 }
-                if is_max {
+                // dust is darker than everything around it; the dark side of an edge isn't
+                let ring = (0..8).all(|k| {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    let (sx, sy) = ((x as f32 + a.cos() * 10.0).round().clamp(0.0, (w - 1) as f32) as usize, (y as f32 + a.sin() * 10.0).round().clamp(0.0, (h - 1) as f32) as usize);
+                    fine.data[sy * w + sx] - fine.data[i] > d * 0.5
+                });
+                if is_max && ring {
                     cands.push((d, x, y));
                 }
             }
         }
     }
+    // dust is isolated; ripples, fabric and foliage give clusters of look-alikes
+    let all = cands.clone();
+    cands.retain(|&(d, x, y)| !all.iter().any(|&(d2, x2, y2)| (x2, y2) != (x, y) && d2 > d * 0.5 && x.abs_diff(x2).pow(2) + y.abs_diff(y2).pow(2) < 30 * 30));
     cands.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     cands.truncate(max_spots);
     cands

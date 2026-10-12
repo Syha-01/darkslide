@@ -37,7 +37,11 @@ fn spot(mask: &Plane) -> RetouchSpot {
 /// People: person segmentation (learned model if installed), dilated a bit
 /// so the fill doesn't leave outlines.
 pub fn remove_people(engine: &Engine, s: &DevelopSettings) -> Option<RetouchSpot> {
-    let m = crate::ai::detect(engine, s, AiMaskKind::Person, None);
+    // the colour/texture fallback can't tell people apart; without a model, find nothing
+    let (m, model) = crate::ai::detect_with_source(engine, s, AiMaskKind::Person, None);
+    if !model {
+        return None;
+    }
     let bin = m.map(|v| if v > 0.5 { 1.0 } else { 0.0 });
     if bin.data.iter().sum::<f32>() < 50.0 {
         return None;

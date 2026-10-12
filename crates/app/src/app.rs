@@ -128,7 +128,8 @@ pub struct App {
     pub merge: crate::dialogs::MergeDialog,
     pub grid: bool,
     pub profiles: crate::dialogs::ProfileBrowser,
-    pub distract_jobs: Arc<Mutex<Vec<(u64, Option<darkslide_core::params::RetouchSpot>)>>>,
+    /// Finished distraction removals: doc, spot, and what to say when nothing was found.
+    pub distract_jobs: Arc<Mutex<Vec<(u64, Option<darkslide_core::params::RetouchSpot>, &'static str)>>>,
     /// Finished lens database download: lens count or error.
     pub lens_dl: Arc<Mutex<Option<Result<usize, String>>>>,
     /// "Reset all settings?" confirmation is showing.
@@ -347,14 +348,14 @@ impl App {
             }
         }
         // finished distraction detections
-        let found: Vec<(u64, Option<darkslide_core::params::RetouchSpot>)> = std::mem::take(&mut *self.distract_jobs.lock().unwrap());
-        for (id, spot) in found {
+        let found = std::mem::take(&mut *self.distract_jobs.lock().unwrap());
+        for (id, spot, none) in found {
             match (self.docs.iter_mut().find(|d| d.id == id), spot) {
                 (Some(d), Some(sp)) => {
                     d.settings.retouch.push(sp);
                     self.status = "Distraction removed".into();
                 }
-                (_, None) => self.status = "Nothing found to remove".into(),
+                (_, None) => self.status = none.into(),
                 _ => {}
             }
         }
@@ -751,10 +752,20 @@ impl App {
                 }
                 Action::DetectDust => {
                     let base = e.base(darkslide_core::demosaic::Quality::Draft);
-                    let spots = darkslide_core::retouch::detect_dust(&base, 40);
+                    // a second run only adds spots that aren't covered yet
+                    let have: Vec<([f32; 2], f32)> = d.settings.retouch.iter().filter_map(|s| s.points.first().map(|p| (*p, s.radius))).collect();
+                    let spots: Vec<_> = darkslide_core::retouch::detect_dust(&base, 40)
+                        .into_iter()
+                        .filter(|n| n.points.first().is_some_and(|p| have.iter().all(|(q, r)| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2)).sqrt() > r.max(n.radius) * 2.0)))
+                        .collect();
                     let n = spots.len();
                     d.settings.retouch.extend(spots);
-                    self.status = format!("Found {n} dust spot(s)");
+                    self.status = match n {
+                        0 if have.is_empty() => "No dust spots found".into(),
+                        0 => "No new dust spots found".into(),
+                        1 => "Found 1 dust spot".into(),
+                        _ => format!("Found {n} dust spots"),
+                    };
                 }
                 Action::ResetAll => self.confirm_reset = true,
                 Action::DownloadLensDb => self.download_lens_db(),
@@ -772,7 +783,8 @@ impl App {
                     *busy.lock().unwrap() = Some(if people { "Finding people…".into() } else { "Finding wires…".into() });
                     std::thread::spawn(move || {
                         let spot = if people { darkslide_core::distract::remove_people(&e, &s) } else { darkslide_core::distract::remove_wires(&e, &s) };
-                        out.lock().unwrap().push((id, spot));
+                        let none = if people { "No people found (this needs the AI model installed)" } else { "No wires or cables found" };
+                        out.lock().unwrap().push((id, spot, none));
                         *busy.lock().unwrap() = None;
                     });
                 }

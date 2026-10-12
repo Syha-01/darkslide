@@ -568,7 +568,8 @@ fn cursor_for(app: &App, map: &ViewMap, p: Pos2) -> Cursor {
                 if let Some(c) = sp.points.first() {
                     let dst = map.from_s([c[0] as f64, c[1] as f64]);
                     let src = map.from_s([(c[0] + sp.source_offset[0]) as f64, (c[1] + sp.source_offset[1]) as f64]);
-                    if (sp.mode != RetouchMode::Remove && src.distance(p) < 12.0) || dst.distance(p) < 10.0 {
+                    let r = (sp.radius * map.long_edge() * map.scale()).max(10.0);
+                    if (sp.mode != RetouchMode::Remove && src.distance(p) < 12.0) || dst.distance(p) < r {
                         return Cursor::Icon(Move);
                     }
                 }
@@ -762,7 +763,8 @@ fn begin_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, alt: bool) -> DragKind
                         app.tools.selected_spot = Some(i);
                         return DragKind::SpotSource(i);
                     }
-                    if dst.distance(p) < 10.0 {
+                    // the whole spot grabs, as a click selects anywhere inside it
+                    if dst.distance(p) < (sp.radius * map.long_edge() * map.scale()).max(10.0) {
                         app.tools.selected_spot = Some(i);
                         return DragKind::SpotMove(i);
                     }
@@ -1696,7 +1698,16 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                     if dst.len() == 1 {
                         painter.circle_stroke(dst[0], r, Stroke::new(if sel { 1.8 } else { 1.0 }, col));
                     } else {
-                        painter.add(egui::Shape::line(dst.clone(), Stroke::new((r * 2.0).max(1.0), Color32::from_white_alpha(if sel { 70 } else { 35 }))));
+                        // the stroke's outline, so the healed result stays visible
+                        let line = Stroke::new(if sel { 1.5 } else { 1.0 }, col);
+                        for w in dst.windows(2) {
+                            let n = (w[1] - w[0]).normalized().rot90() * r;
+                            painter.line_segment([w[0] + n, w[1] + n], line);
+                            painter.line_segment([w[0] - n, w[1] - n], line);
+                        }
+                        for end in [dst[0], dst[dst.len() - 1]] {
+                            painter.circle_stroke(end, r, line);
+                        }
                     }
                     if sel && sp.mode != RetouchMode::Remove {
                         let src: Vec<Pos2> =
