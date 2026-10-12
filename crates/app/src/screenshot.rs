@@ -1,6 +1,7 @@
 //! Headless UI screenshots for development (`--features screenshot`):
 //! `darkslide --screenshot out.png [--tool crop] [--set Exposure2012=1] [--mask sky] FILE...`
 
+use egui_phosphor::regular as ic;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -54,7 +55,7 @@ pub fn smoke(args: Vec<String>) -> anyhow::Result<()> {
                 "Full",
             ],
         ),
-        (Tool::Crop, &["Auto", "⟳ 90°", "⇔", "Reset crop", "Straighten tool"]),
+        (Tool::Crop, &["Auto", "90°", ic::FLIP_HORIZONTAL, "Reset crop", "Straighten tool"]),
         (Tool::Remove, &["Remove", "Clone", "Heal", "Visualize spots", "Dust spots", "Clear all"]),
         (Tool::Masking, &["Sky", "Linear", "Radial", "Luminance range", "Color range", "Background", "Brush"]),
         (Tool::RedEye, &["Pet eye", "Red eye", "Clear all"]),
@@ -291,7 +292,7 @@ pub fn run(args: Vec<String>) -> anyhow::Result<()> {
                     d.settings.masks.iter().any(|m| m.components.iter().any(|c| matches!(c.shape, darkslide_core::params::MaskShape::Ai { raster: None, .. })))
                 })
                 .unwrap_or(false);
-        let thumbs_pending = st.profiles.open && st.profiles.items.lock().unwrap().iter().any(|i| i.3.is_none());
+        let thumbs_pending = (st.profiles.open && st.profiles.items.lock().unwrap().iter().any(|i| i.3.is_none())) || st.tools.preset_ui.thumbs_pending();
         if st.fit_tex.is_some() && !pending_ai && !thumbs_pending {
             idle += 1;
             if idle > 40 {

@@ -1,6 +1,7 @@
 //! Dialog windows: Save Image, copy/paste settings subset, preferences,
 //! shortcuts, about.
 
+use egui_phosphor::regular as ic;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -97,7 +98,7 @@ fn export_window(app: &mut App, ctx: &egui::Context) {
                         ex.dest = Some(d);
                     }
                 }
-                if ex.dest.is_some() && ui.small_button("✖").clicked() {
+                if ex.dest.is_some() && ui.small_button(ic::X).clicked() {
                     ex.dest = None;
                 }
             });

@@ -1,5 +1,6 @@
 //! Application state, layout, shortcuts and render scheduling.
 
+use egui_phosphor::regular as ic;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1314,7 +1315,7 @@ impl App {
                 if ui.add(egui::Button::new("?").frame(false)).on_hover_text("About Darkslide").clicked() {
                     self.show_about = true;
                 }
-                if ui.add(egui::Button::new("⌨").frame(false)).on_hover_text("Keyboard shortcuts").clicked() {
+                if ui.add(egui::Button::new(RichText::new(ic::KEYBOARD).size(15.0)).frame(false)).on_hover_text("Keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
                 }
                 if ui.add(egui::Button::new("⚙").frame(false)).on_hover_text("Preferences…").clicked() {
@@ -1323,12 +1324,20 @@ impl App {
                 ui.separator();
                 let can_redo = self.doc().map(|d| !d.redo.is_empty()).unwrap_or(false);
                 let can_undo = self.doc().map(|d| !d.undo.is_empty()).unwrap_or(false);
-                if ui.add_enabled(can_redo, egui::Button::new(RichText::new("↷").size(14.0)).frame(false)).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                if ui
+                    .add_enabled(can_redo, egui::Button::new(RichText::new(ic::ARROW_U_UP_RIGHT).size(15.0)).frame(false))
+                    .on_hover_text("Redo (Ctrl+Shift+Z)")
+                    .clicked()
+                {
                     if let Some(d) = self.doc_mut() {
                         d.redo();
                     }
                 }
-                if ui.add_enabled(can_undo, egui::Button::new(RichText::new("↶").size(14.0)).frame(false)).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                if ui
+                    .add_enabled(can_undo, egui::Button::new(RichText::new(ic::ARROW_U_UP_LEFT).size(15.0)).frame(false))
+                    .on_hover_text("Undo (Ctrl+Z)")
+                    .clicked()
+                {
                     if let Some(d) = self.doc_mut() {
                         d.undo();
                     }
@@ -1383,7 +1392,7 @@ impl App {
                 ui.painter().rect_filled(s_rect, 4.0, crate::theme::pal().button);
             }
             let s_col = if s_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
-            ui.painter().text(s_rect.center(), egui::Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(16.0), s_col);
+            ui.painter().text(s_rect.center(), egui::Align2::CENTER_CENTER, ic::GEAR_SIX, egui::FontId::proportional(19.0), s_col);
             if s_resp.on_hover_text("Preferences…").clicked() {
                 self.show_prefs = true;
             }
@@ -1394,7 +1403,7 @@ impl App {
                 ui.painter().rect_filled(f_rect, 4.0, crate::theme::pal().button);
             }
             let f_col = if f_resp.hovered() || self.fullscreen { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
-            ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, "⛶", egui::FontId::proportional(16.0), f_col);
+            ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, ic::CORNERS_OUT, egui::FontId::proportional(19.0), f_col);
             if f_resp.on_hover_text("Full screen (F)").clicked() {
                 self.fullscreen = !self.fullscreen;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
@@ -1472,7 +1481,7 @@ impl App {
                 Tool::Remove => tool_panels::remove_panel(ui, doc, &mut self.tools, &mut actions),
                 Tool::Masking => tool_panels::masking_panel(ui, doc, &mut self.tools, &mut self.edit, &mut self.pick),
                 Tool::RedEye => tool_panels::redeye_panel(ui, doc, &mut self.tools),
-                Tool::Presets => tool_panels::presets_panel(ui, doc, &mut self.tools),
+                Tool::Presets => crate::presets_panel::presets_panel(ui, doc, &mut self.tools),
                 Tool::Snapshots => tool_panels::snapshots_panel(ui, doc, &mut self.tools),
             }
         });
@@ -1527,14 +1536,18 @@ impl App {
                     ui.selectable_value(&mut self.zoom, Zoom::Scale(z), format!("{:.0}%", z * 100.0));
                 }
             });
-            if ui.add_sized([22.0, 20.0], egui::Button::new("−")).clicked() {
+            if ui.add_sized([22.0, 20.0], egui::Button::new(ic::MINUS)).clicked() {
                 self.zoom_step(-1);
             }
             if ui.add_sized([22.0, 20.0], egui::Button::new("+")).clicked() {
                 self.zoom_step(1);
             }
             ui.separator();
-            if ui.selectable_label(self.ba != BeforeAfter::Off, "◫").on_hover_text("Cycle before/after views (Q)").clicked() {
+            if ui
+                .selectable_label(self.ba != BeforeAfter::Off, RichText::new(ic::SQUARE_SPLIT_HORIZONTAL).size(15.0))
+                .on_hover_text("Cycle before/after views (Q)")
+                .clicked()
+            {
                 self.ba = self.ba.next();
             }
             ui.selectable_label(self.show_before, "Before").on_hover_text("Toggle before (\\)").clicked().then(|| self.show_before = !self.show_before);

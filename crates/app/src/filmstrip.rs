@@ -1,6 +1,7 @@
 //! Filmstrip: thumbnails, ratings, labels, selection, filtering.
 
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui_phosphor::regular as ic;
 
 use crate::app::App;
 use crate::doc::ColorLabel;
@@ -79,7 +80,13 @@ pub fn filmstrip(app: &mut App, ui: &mut egui::Ui) {
                     p.rect_filled(egui::Rect::from_min_size(pos2(rect.right() - 12.0, rect.bottom() - 10.0), vec2(8.0, 6.0)), 1.0, d.label.color());
                 }
                 if d.dirty || d.settings != darkslide_core::DevelopSettings::defaults_for(d.is_raw()) && d.engine.is_some() {
-                    p.text(pos2(rect.right() - 4.0, rect.top() + 2.0), egui::Align2::RIGHT_TOP, "✎", egui::FontId::proportional(10.0), Color32::LIGHT_GRAY);
+                    p.text(
+                        pos2(rect.right() - 4.0, rect.top() + 2.0),
+                        egui::Align2::RIGHT_TOP,
+                        ic::PENCIL_SIMPLE,
+                        egui::FontId::proportional(11.0),
+                        Color32::LIGHT_GRAY,
+                    );
                 }
                 if current {
                     p.rect_stroke(rect, 3.0, Stroke::new(1.5, crate::widgets::ACCENT), StrokeKind::Inside);

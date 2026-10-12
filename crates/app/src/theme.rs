@@ -24,6 +24,9 @@ fn install_fonts(ctx: &egui::Context) {
             }
         }
     }
+    // Phosphor icons, regular weight inline with text, fill as its own family
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    egui_phosphor::add_font_bytes_as_family(&mut fonts, "phosphor-fill", egui_phosphor::Variant::Fill.font_bytes());
     ctx.set_fonts(fonts);
 }
 

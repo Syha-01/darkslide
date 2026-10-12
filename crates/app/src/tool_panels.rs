@@ -2,8 +2,9 @@
 //! Presets and Snapshots.
 
 use darkslide_core::params::*;
-use darkslide_core::xmp::{self, Preset};
+use darkslide_core::xmp::Preset;
 use eframe::egui::{self, Color32, RichText};
+use egui_phosphor::regular as ic;
 
 use crate::doc::Doc;
 use crate::edit_panel::{self, EditUi, Pick};
@@ -23,13 +24,13 @@ pub enum Tool {
 
 impl Tool {
     pub const ALL: [(Tool, &'static str, &'static str); 7] = [
-        (Tool::Edit, "🎚", "Edit (E)"),
-        (Tool::Crop, "⛶", "Crop & rotate (C)"),
-        (Tool::Remove, "✚", "Remove (B)"),
-        (Tool::Masking, "◐", "Masking (M)"),
-        (Tool::RedEye, "👁", "Red eye"),
-        (Tool::Presets, "★", "Presets (P)"),
-        (Tool::Snapshots, "📷", "Snapshots (S)"),
+        (Tool::Edit, ic::SLIDERS_HORIZONTAL, "Edit (E)"),
+        (Tool::Crop, ic::CROP, "Crop & rotate (C)"),
+        (Tool::Remove, ic::BANDAIDS, "Remove (B)"),
+        (Tool::Masking, ic::CIRCLE_DASHED, "Masking (M)"),
+        (Tool::RedEye, ic::EYE, "Red eye"),
+        (Tool::Presets, ic::INTERSECT, "Presets (P)"),
+        (Tool::Snapshots, ic::STACK, "Snapshots (S)"),
     ];
 }
 
@@ -95,6 +96,7 @@ pub struct ToolUi {
     /// Settings to show while hovering a preset (not committed).
     pub hover_preview: Option<DevelopSettings>,
     pub status: Option<String>,
+    pub preset_ui: crate::presets_panel::PresetUi,
 }
 
 impl Default for ToolUi {
@@ -129,6 +131,7 @@ impl Default for ToolUi {
             request_ai: None,
             hover_preview: None,
             status: None,
+            preset_ui: Default::default(),
         }
     }
 }
@@ -161,7 +164,7 @@ pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
                 }
             }
         });
-        if s.crop.aspect.is_some() && ui.button("⟲").on_hover_text("Swap orientation (X)").clicked() {
+        if s.crop.aspect.is_some() && ui.button(ic::ARROWS_LEFT_RIGHT).on_hover_text("Swap orientation (X)").clicked() {
             if let Some(a) = s.crop.aspect.as_mut() {
                 a.swap(0, 1);
             }
@@ -192,7 +195,7 @@ pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
         fit_crop_inside(s, &engine);
     }
     ui.horizontal(|ui| {
-        if ui.selectable_label(t.straighten, "📐 Straighten tool").on_hover_text("Draw a line along the horizon").clicked() {
+        if ui.selectable_label(t.straighten, format!("{}  Straighten tool", ic::RULER)).on_hover_text("Draw a line along the horizon").clicked() {
             t.straighten = !t.straighten;
         }
         if ui.button("Auto").on_hover_text("Auto straighten").clicked() {
@@ -208,14 +211,14 @@ pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
             s.crop.rotate90 = (s.crop.rotate90 + 3) % 4;
             reset_crop(s);
         }
-        if ui.button("⟳ 90°").on_hover_text("Rotate clockwise").clicked() {
+        if ui.button(format!("{}  90°", ic::ARROW_CLOCKWISE)).on_hover_text("Rotate clockwise").clicked() {
             s.crop.rotate90 = (s.crop.rotate90 + 1) % 4;
             reset_crop(s);
         }
-        if ui.button("⇔").on_hover_text("Flip horizontal").clicked() {
+        if ui.button(ic::FLIP_HORIZONTAL).on_hover_text("Flip horizontal").clicked() {
             s.crop.flip_h = !s.crop.flip_h;
         }
-        if ui.button("⇕").on_hover_text("Flip vertical").clicked() {
+        if ui.button(ic::FLIP_VERTICAL).on_hover_text("Flip vertical").clicked() {
             s.crop.flip_v = !s.crop.flip_v;
         }
     });
@@ -328,7 +331,7 @@ pub fn remove_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, actions: &
     ui.label(format!("{} spot(s)", s.retouch.len()));
     ui.horizontal(|ui| {
         if let Some(i) = t.selected_spot {
-            if ui.button("🗑 Delete spot").clicked() && i < s.retouch.len() {
+            if ui.button(format!("{}  Delete spot", ic::TRASH)).clicked() && i < s.retouch.len() {
                 s.retouch.remove(i);
                 t.selected_spot = None;
             }
@@ -395,10 +398,10 @@ pub fn snapshots_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
                 apply = Some(i);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("🗑").clicked() {
+                if ui.small_button(ic::TRASH).clicked() {
                     remove = Some(i);
                 }
-                if ui.small_button("⟳").on_hover_text("Update with current settings").clicked() {
+                if ui.small_button(ic::ARROWS_CLOCKWISE).on_hover_text("Update with current settings").clicked() {
                     update = Some(i);
                 }
             });
@@ -420,102 +423,6 @@ pub fn snapshots_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
     }
 }
 
-pub fn presets_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
-    t.hover_preview = None;
-    if !t.presets_loaded {
-        t.presets = xmp::list_presets();
-        t.presets_loaded = true;
-    }
-    ui.heading("Presets");
-    slider(ui, &mut t.preset_amount, SliderSpec::new("Amount", 0.0, 200.0, 100.0));
-    ui.horizontal(|ui| {
-        if ui.button("Import…").clicked() {
-            if let Some(files) = rfd::FileDialog::new().add_filter("XMP presets", &["xmp"]).pick_files() {
-                let dir = darkslide_core::paths::presets_dir().join("Imported");
-                let _ = std::fs::create_dir_all(&dir);
-                for f in files {
-                    if let Some(name) = f.file_name() {
-                        let _ = std::fs::copy(&f, dir.join(name));
-                    }
-                }
-                t.presets_loaded = false;
-            }
-        }
-        if ui.button("⟳").on_hover_text("Rescan presets folder").clicked() {
-            t.presets_loaded = false;
-        }
-        if ui.button("📂").on_hover_text("Open presets folder").clicked() {
-            let d = darkslide_core::paths::presets_dir();
-            let _ = std::fs::create_dir_all(&d);
-            let _ = std::process::Command::new("xdg-open").arg(d).spawn();
-        }
-    });
-    ui.separator();
-    ui.collapsing("Create preset from current settings", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut t.new_preset_name).hint_text("Name"));
-        ui.add(egui::TextEdit::singleline(&mut t.new_preset_group).hint_text("Group"));
-        if ui.button("Save preset").clicked() && !t.new_preset_name.trim().is_empty() {
-            let mut s = doc.settings.clone();
-            // presets never carry image-specific geometry or spot edits
-            s.crop = Crop::default();
-            s.retouch.clear();
-            s.red_eye.clear();
-            match xmp::save_preset(t.new_preset_name.trim(), t.new_preset_group.trim(), &s) {
-                Ok(p) => t.status = Some(format!("Saved {}", p.display())),
-                Err(e) => t.status = Some(format!("Error: {e}")),
-            }
-            t.new_preset_name.clear();
-            t.presets_loaded = false;
-        }
-    });
-    ui.separator();
-    let mut group = String::new();
-    let mut builtin_applied: Option<fn(&mut DevelopSettings)> = None;
-    for bp in darkslide_core::builtin_presets::all() {
-        if bp.group != group {
-            group = bp.group.to_string();
-            ui.label(RichText::new(&group).strong());
-        }
-        let r = ui.selectable_label(false, format!("  {}", bp.name));
-        if r.clicked() {
-            builtin_applied = Some(bp.apply);
-        } else if r.hovered() {
-            let mut target = doc.settings.clone();
-            (bp.apply)(&mut target);
-            t.hover_preview = Some(xmp::blend(&doc.settings, &target, t.preset_amount / 100.0));
-        }
-    }
-    if let Some(f) = builtin_applied {
-        let mut target = doc.settings.clone();
-        f(&mut target);
-        doc.settings = xmp::blend(&doc.settings, &target, t.preset_amount / 100.0);
-    }
-    ui.separator();
-    if t.presets.is_empty() {
-        ui.label(RichText::new(format!("No presets found in {}", darkslide_core::paths::presets_dir().display())).weak().small());
-    }
-    let mut group = String::new();
-    let mut applied = None;
-    for (i, p) in t.presets.iter().enumerate() {
-        if p.group != group {
-            group = p.group.clone();
-            ui.label(RichText::new(&group).strong());
-        }
-        let r = ui.selectable_label(false, format!("  {}", p.name));
-        if r.clicked() {
-            applied = Some(i);
-        } else if r.hovered() {
-            t.hover_preview = Some(p.apply(&doc.settings, t.preset_amount));
-        }
-    }
-    if let Some(i) = applied {
-        doc.settings = t.presets[i].apply(&doc.settings, t.preset_amount);
-    }
-    if let Some(st) = &t.status {
-        ui.label(RichText::new(st).small());
-    }
-}
-
 pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut EditUi, pick: &mut Pick) {
     let s = &mut doc.settings;
     ui.heading("Masking");
@@ -523,38 +430,38 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
     let mut create: Option<MaskShape> = None;
     let mut ai: Option<AiMaskKind> = None;
     ui.horizontal_wrapped(|ui| {
-        if ui.button("👤 Subject").clicked() {
+        if ui.button(format!("{}  Subject", ic::USER)).clicked() {
             ai = Some(AiMaskKind::Subject);
         }
-        if ui.button("☁ Sky").clicked() {
+        if ui.button(format!("{}  Sky", ic::CLOUD)).clicked() {
             ai = Some(AiMaskKind::Sky);
         }
-        if ui.button("▧ Background").clicked() {
+        if ui.button(format!("{}  Background", ic::IMAGE)).clicked() {
             ai = Some(AiMaskKind::Background);
         }
-        if ui.button("🎯 Objects").on_hover_text("Drag a box around the object").clicked() {
+        if ui.button(format!("{}  Objects", ic::BOUNDING_BOX)).on_hover_text("Drag a box around the object").clicked() {
             t.mask_tool = MaskTool::ObjectBox;
         }
-        if ui.button("🖌 Brush").clicked() {
+        if ui.button(format!("{}  Brush", ic::PAINT_BRUSH)).clicked() {
             create = Some(MaskShape::Brush { strokes: vec![] });
             t.mask_tool = MaskTool::Brush;
         }
-        if ui.button("▤ Linear").clicked() {
+        if ui.button(format!("{}  Linear", ic::GRADIENT)).clicked() {
             t.mask_tool = MaskTool::Linear;
             t.selected_mask = None;
         }
-        if ui.button("◯ Radial").clicked() {
+        if ui.button(format!("{}  Radial", ic::CIRCLE)).clicked() {
             t.mask_tool = MaskTool::Radial;
             t.selected_mask = None;
         }
-        if ui.button("🎨 Color range").clicked() {
+        if ui.button(format!("{}  Color range", ic::PALETTE)).clicked() {
             create = Some(MaskShape::ColorRange { samples: vec![], refine: 50.0 });
             *pick = Pick::Sampler;
         }
-        if ui.button("☀ Luminance range").clicked() {
+        if ui.button(format!("{}  Luminance range", ic::SUN)).clicked() {
             create = Some(MaskShape::LuminanceRange { range: [0.6, 1.0], smoothness: 30.0 });
         }
-        if ui.button("⛰ Depth range").clicked() {
+        if ui.button(format!("{}  Depth range", ic::MOUNTAINS)).clicked() {
             create = Some(MaskShape::DepthRange { range: [0.0, 0.3], smoothness: 30.0 });
         }
     });
@@ -608,7 +515,7 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
                 t.selected_comp = Some(0);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("🗑").clicked() {
+                if ui.small_button(ic::TRASH).clicked() {
                     del = Some(i);
                 }
             });
@@ -660,7 +567,7 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
                 };
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if m_comp_count_gt1(ci) && ui.small_button("🗑").clicked() {
+                if m_comp_count_gt1(ci) && ui.small_button(ic::TRASH).clicked() {
                     cdel = Some(ci);
                 }
                 ui.checkbox(&mut c.invert, "inv");
@@ -810,7 +717,7 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
         if (nh - a.color[0]).abs() > 0.5 && ns > 0.0 || (ns - a.color[1]).abs() > 0.5 {
             a.color = [nh, ns];
         }
-        if ui.small_button("✖").clicked() {
+        if ui.small_button(ic::X).clicked() {
             a.color = [0.0, 0.0];
         }
     });

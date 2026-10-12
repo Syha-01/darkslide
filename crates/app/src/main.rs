@@ -4,6 +4,7 @@ mod dialogs;
 mod doc;
 mod edit_panel;
 mod filmstrip;
+mod presets_panel;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 mod theme;

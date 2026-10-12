@@ -6,6 +6,7 @@ use darkslide_core::params::*;
 use darkslide_core::pipeline::curves::{Lut, point_curve_lut};
 use darkslide_core::profiles::{self, BUILTIN_LOOKS, PROFILES};
 use eframe::egui::{self, Color32, RichText};
+use egui_phosphor::regular as ic;
 
 use crate::doc::Doc;
 use crate::widgets::{self, SliderSpec, section, slider};
@@ -143,7 +144,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     }
                 }
             });
-            if ui.button("▦").on_hover_text("Browse profiles and looks").clicked() {
+            if ui.button(ic::SQUARES_FOUR).on_hover_text("Browse profiles and looks").clicked() {
                 pc.actions.push(Action::BrowseProfiles);
             }
         });
@@ -319,7 +320,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                 }
             }
             let active = *pc.pick == Pick::TatCurve;
-            if ui.selectable_label(active, "⊕").on_hover_text("Targeted adjustment: drag up/down in the image").clicked() {
+            if ui.selectable_label(active, ic::CROSSHAIR_SIMPLE).on_hover_text("Targeted adjustment: drag up/down in the image").clicked() {
                 *pc.pick = if active { Pick::None } else { Pick::TatCurve };
             }
         });
@@ -389,7 +390,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     s.gray_mix = [0.0; 8];
                 }
                 let active = *pc.pick == Pick::TatMixer(3);
-                if ui.selectable_label(active, "⊕").on_hover_text("Targeted adjustment").clicked() {
+                if ui.selectable_label(active, ic::CROSSHAIR_SIMPLE).on_hover_text("Targeted adjustment").clicked() {
                     *pc.pick = if active { Pick::None } else { Pick::TatMixer(3) };
                 }
             });
@@ -403,7 +404,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     ui.selectable_value(&mut st.mixer_tab, i as u8, *t);
                 }
                 let active = matches!(*pc.pick, Pick::TatMixer(_));
-                if ui.selectable_label(active, "⊕").on_hover_text("Targeted adjustment: drag in the image").clicked() {
+                if ui.selectable_label(active, ic::CROSSHAIR_SIMPLE).on_hover_text("Targeted adjustment: drag in the image").clicked() {
                     *pc.pick = if active { Pick::None } else { Pick::TatMixer(st.mixer_tab.min(2)) };
                 }
             });
@@ -687,7 +688,7 @@ pub fn point_color_ui_ext(ui: &mut egui::Ui, pcs: &mut Vec<PointColor>, sel: &mu
             if let Some(v) = visualize {
                 ui.checkbox(v, "Visualize range");
             }
-            if ui.button("🗑 Delete swatch").clicked() {
+            if ui.button(format!("{}  Delete swatch", ic::TRASH)).clicked() {
                 delete = true;
             }
         });
