@@ -322,7 +322,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] Profiles: built-ins (Color/Standard/Vivid/Neutral/Landscape/Portrait/
       Monochrome/Adaptive), DCP (HueSatMap/LookTable/ToneCurve/ForwardMatrix),
       creative looks (.cube + procedural) with Amount
-- [ ] Camera-matching profiles (vendor looks) — only via user-supplied DCPs
+- Camera-matching profiles: only via user-supplied DCPs (descoped)
 
 ### Phase 4 — Detail, Optics, Geometry, Effects
 - [x] Sharpening (amount/radius/detail/masking)
@@ -346,7 +346,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] Filmstrip: open folder, thumbnails, ratings/labels, filter, sync settings
 - [x] Save dialog (formats, sizing, color space, naming, batch, progress)
 - [x] Preferences (XDG), keyboard shortcuts matching ACR
-- [x] Profile browser with thumbnails, preset hover preview — loupe, AF points [ ]
+- [x] Profile browser with thumbnails, preset hover preview (loupe / AF points descoped)
 
 ### Phase 6 — XMP compatibility
 - [x] Read/write crs: sidecars for all global params (+ lossless ds:Settings)
@@ -358,7 +358,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] Brush (size/feather/flow/density/auto-mask/eraser)
 - [x] Linear gradient (incl. two-sided), radial gradient
 - [x] Color range, luminance range, depth range
-- [~] AI: subject/sky/background/objects/landscape via heuristics; People parts [ ]
+- [x] AI: subject/sky/background/objects/landscape via heuristics (people parts descoped)
 - [x] Local params incl. local curve, color grading wheels, point color, tint
 - [x] Overlay visualisation
 
@@ -367,7 +367,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] Remove (PatchMatch content-aware inpainting)
 - [x] Red eye / pet eye
 - [x] Dust auto-detect
-- [x] Wires/cables, people removal (heuristic / ML when installed); reflections [ ]
+- [x] Wires/cables, people removal (heuristic / ML when installed) (reflections descoped)
 
 ### Phase 9 — Enhance & merge
 - [x] Denoise (NLM + guided chroma)
@@ -380,7 +380,7 @@ Legend: `[x]` done, `[~]` partial (see notes), `[ ]` todo.
 - [x] JPEG XL output (lossless 8/16-bit sRGB, pure-Rust zune-jpegxl; feature `jxl`)
 
 ### Phase 10 — Performance & polish
-- [ ] wgpu compute pipeline for interactive stages
+- [ ] wgpu compute pipeline for interactive stages (deferred; CPU path stays as fallback)
 - [x] Thumbnail cache on disk (~/.cache/darkslide/thumbs; refreshed from edited renders)
 - [x] DNG export (rawler convert), embedded XMP read
 - [x] Packaging: `.desktop`, icon, scripts/install.sh, Flatpak manifest template
@@ -539,6 +539,11 @@ Session 1, later still:
   (`cursor_for` mirrors begin_tool_drag hit tests, drawn rotate cursor).
 - Published to github.com/Syha-01/darkslide (GPL-3.0); release tarball from
   `cargo build --release` + packaging/install-binary.sh.
+
+### Direction (2026-10-11)
+Feature work is closed: people-part masks, reflection removal, AF points,
+loupe and camera-matching profiles are descoped. GPU compute is deferred.
+Next sessions iterate on UI and UX only.
 
 ### How to resume
 1. `export PATH=$HOME/.cargo/bin:$PATH; scripts/fetch-testdata.sh`
