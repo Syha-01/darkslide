@@ -1125,7 +1125,7 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
     egui::CollapsingHeader::new(RichText::new("Curve").strong()).id_salt(("mcurve", mi)).show(ui, |ui| {
         crate::widgets::curve_editor(
             ui,
-            crate::widgets::CurveEdit { points: &mut a.curve.rgb, color: Color32::from_gray(230), hist: None, id: ui.id().with(("mc", mi)) },
+            crate::widgets::CurveEdit { points: &mut a.curve.rgb, color: Color32::from_gray(230), hist: None, id: ui.id().with(("mc", mi)), read_only: false },
             &[],
         );
     });

@@ -711,6 +711,31 @@ pub fn script(args: Vec<String>) -> anyhow::Result<()> {
                     }
                 }
             }
+            // one line per mask: name, components, selection
+            "masks" => {
+                let st = h.state();
+                let t = &st.tools;
+                println!("[{}] masks: selected={:?}/{:?} tool={:?} place={:?} create_open={}", ln + 1, t.selected_mask, t.selected_comp, t.mask_tool, t.place_comp, t.show_create);
+                if let Some(d) = st.doc() {
+                    for m in &d.settings.masks {
+                        let comps: Vec<String> = m
+                            .components
+                            .iter()
+                            .map(|c| {
+                                let k = format!("{:?}", c.shape);
+                                let k = k.split([' ', '{', '(']).next().unwrap_or("").to_string();
+                                let detected = match &c.shape {
+                                    darkslide_core::params::MaskShape::Ai { raster, .. } => if raster.is_some() { " detected" } else { " pending" },
+                                    _ => "",
+                                };
+                                format!("{:?} {k}{detected}", c.op)
+                            })
+                            .collect();
+                        println!("    {} [{}]", m.name, comps.join(", "));
+                    }
+                    println!("    undo depth {}", d.undo.len());
+                }
+            }
             "cursor" => println!("[{}] cursor at {:?}: {:?}", ln + 1, pointer, h.output().platform_output.cursor_icon),
             "set" => {
                 let mut sets = HashMap::new();

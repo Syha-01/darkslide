@@ -42,26 +42,6 @@ pub fn draw_tool_icon(painter: &egui::Painter, tool: Tool, center: Pos2, size: f
     painter.text(center, egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(size), color);
 }
 
-#[allow(dead_code)]
-pub fn draw_icon_eyedropper(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
-    let s = size * 0.38;
-    let a = (-45.0f32).to_radians();
-    let dir = vec2(a.cos(), a.sin());
-    let normal = vec2(-dir.y, dir.x);
-    let tip = center + dir * s;
-    let bulb = center - dir * s;
-    let barrel1 = tip - dir * (s * 0.4) + normal * 2.0;
-    let barrel2 = tip - dir * (s * 0.4) - normal * 2.0;
-    let bulb1 = bulb + normal * 2.8;
-    let bulb2 = bulb - normal * 2.8;
-    painter.line_segment([tip, barrel1], Stroke::new(1.2, color));
-    painter.line_segment([tip, barrel2], Stroke::new(1.2, color));
-    painter.line_segment([barrel1, bulb1], Stroke::new(1.2, color));
-    painter.line_segment([barrel2, bulb2], Stroke::new(1.2, color));
-    painter.line_segment([bulb1, bulb2], Stroke::new(1.2, color));
-    painter.circle_filled(tip + dir * 2.5, 1.2, color);
-}
-
 pub fn eyedropper_button(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 20.0), Sense::click());
     let painter = ui.painter_at(rect);
@@ -82,7 +62,7 @@ pub fn eyedropper_button(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool
     } else {
         Color32::from_rgb(175, 175, 175)
     };
-    draw_icon_eyedropper(&painter, rect.center(), 14.0, icon_col);
+    painter.text(rect.center(), egui::Align2::CENTER_CENTER, egui_phosphor::regular::EYEDROPPER, egui::FontId::proportional(14.0), icon_col);
     resp.on_hover_text(tooltip).clicked()
 }
 
@@ -105,11 +85,15 @@ pub struct SliderSpec<'a> {
     pub suffix: &'a str,
     /// Logarithmic track (temperature).
     pub log: bool,
+    /// Shift+double-click on the label runs Auto for just this slider.
+    pub auto: bool,
+    /// What Alt shows on the photo while dragging.
+    pub alt: Option<AltPreview>,
 }
 
 impl<'a> SliderSpec<'a> {
     pub fn new(label: &'a str, min: f32, max: f32, default: f32) -> Self {
-        Self { label, min, max, default, decimals: 0, gradient: None, suffix: "", log: false }
+        Self { label, min, max, default, decimals: 0, gradient: None, suffix: "", log: false, auto: false, alt: None }
     }
     pub fn dec(mut self, d: usize) -> Self {
         self.decimals = d;
@@ -125,6 +109,14 @@ impl<'a> SliderSpec<'a> {
     }
     pub fn log(mut self) -> Self {
         self.log = true;
+        self
+    }
+    pub fn auto(mut self) -> Self {
+        self.auto = true;
+        self
+    }
+    pub fn alt(mut self, a: AltPreview) -> Self {
+        self.alt = Some(a);
         self
     }
 }
@@ -149,15 +141,6 @@ pub enum AltPreview {
     Highlights,
     Shadows,
     SharpenMask,
-}
-
-fn alt_kind(label: &str) -> Option<AltPreview> {
-    match label {
-        "Exposure" | "Whites" | "Highlights" => Some(AltPreview::Highlights),
-        "Blacks" | "Shadows" => Some(AltPreview::Shadows),
-        "Masking" => Some(AltPreview::SharpenMask),
-        _ => None,
-    }
 }
 
 pub fn take_auto_slider(ctx: &egui::Context) -> Option<String> {
@@ -196,20 +179,34 @@ fn slider_rows(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     // 1. label + value box
     ui.horizontal(|ui| {
         ui.set_width(total_w);
-        let lab = egui::Label::new(RichText::new(spec.label).size(12.0).color(TEXT_PRIMARY)).sense(Sense::click()).truncate();
+        // the label scrubs the value when dragged, like ACR; it isn't selectable text
+        let lab = egui::Label::new(RichText::new(spec.label).size(12.0).color(TEXT_PRIMARY)).selectable(false).sense(Sense::CLICK | Sense::DRAG).truncate();
         let lab_resp = ui.add(lab);
-        if lab_resp.double_clicked() && ui.input(|i| i.modifiers.shift) {
+        if lab_resp.double_clicked() && spec.auto && ui.input(|i| i.modifiers.shift) {
             // shift + double-click: auto for this slider only (ACR)
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
         } else if lab_resp.double_clicked() && *value != spec.default {
             *value = spec.default;
             changed = true;
+        } else if lab_resp.dragged() {
+            let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+            let t = to_t(&spec, *value) + lab_resp.drag_delta().x / 300.0 * fine;
+            let nv = round_to(from_t(&spec, t), spec.decimals);
+            if nv != *value {
+                *value = nv;
+                changed = true;
+            }
+            mark_interacting(ui);
         }
-        lab_resp.on_hover_text("Double-click to reset, Shift+double-click for Auto");
+        let tip = if spec.auto { "Drag to adjust · double-click to reset · Shift+double-click for Auto" } else { "Drag to adjust · double-click to reset" };
+        lab_resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(tip);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut v = *value;
             let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
-            let dv = egui::DragValue::new(&mut v).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
+            // typed values apply on Enter or leaving the box (one undo step); Esc reverts
+            let dv = egui::DragValue::new(&mut v).update_while_editing(false).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
+                // no "-0" for values that round to zero
+                let n = if round_to(n as f32, spec.decimals) == 0.0 { 0.0 } else { n };
                 let s = format!("{:.*}", spec.decimals, n);
                 let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
                 format!("{s}{}", spec.suffix)
@@ -238,7 +235,8 @@ fn slider_rows(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     });
 
     // 2. track (auto id, so sliders sharing a label never share drag state)
-    let (rect, resp) = ui.allocate_exact_size(vec2(total_w, 13.0), Sense::click_and_drag());
+    // not focusable, so Tab goes from value box to value box
+    let (rect, resp) = ui.allocate_exact_size(vec2(total_w, 13.0), Sense::CLICK | Sense::DRAG);
     let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 12.0, 3.0));
     let painter = ui.painter_at(rect.expand(2.0));
     match spec.gradient {
@@ -295,7 +293,7 @@ fn slider_rows(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
         if resp.dragged() {
             mark_interacting(ui);
             if ui.input(|i| i.modifiers.alt) {
-                if let Some(k) = alt_kind(spec.label) {
+                if let Some(k) = spec.alt {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_alt_preview"), k));
                 }
             }
@@ -337,10 +335,35 @@ pub fn grad_band_lum(center: f32) -> Vec<Color32> {
 
 /// Collapsible section with an enable toggle (ACR's eye icon).
 pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, default_open: bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
-    let id = ui.make_persistent_id(("section", title));
+    section_id(ui, title, title, enabled, default_open, body)
+}
+
+/// Solo mode (opening a section closes the others) is on; set from the prefs each frame.
+pub fn set_solo(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("ds_solo"), on));
+}
+
+/// The header's context menu flipped solo mode; the app saves it.
+pub fn take_solo_toggle(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("ds_solo_toggle")).unwrap_or(false))
+}
+
+/// `key` names the section's open state, so a title that changes (Color /
+/// B&W Mixer) keeps it.
+pub fn section_id<R>(ui: &mut egui::Ui, key: &str, title: &str, enabled: Option<&mut bool>, default_open: bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+    let id = ui.make_persistent_id(("section", key));
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
     let mut toggled = false;
     let open = state.is_open();
+    let solo = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("ds_solo")).unwrap_or(false));
+    // every section seen this frame, for solo mode to close the others
+    let all_id = egui::Id::new("ds_sections");
+    ui.ctx().data_mut(|d| {
+        let v: &mut Vec<egui::Id> = d.get_temp_mut_or_default(all_id);
+        if !v.contains(&id) {
+            v.push(id);
+        }
+    });
 
     let full_w = ui.available_width();
     let header_h = 32.0;
@@ -358,9 +381,9 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
         Stroke::new(1.0, crate::theme::pal().divider),
     );
 
-    let arrow = if open { "▾" } else { "▸" };
+    let arrow = if open { egui_phosphor::regular::CARET_DOWN } else { egui_phosphor::regular::CARET_RIGHT };
     painter.text(
-        pos2(header_rect.left() + 6.0, header_rect.center().y),
+        pos2(header_rect.left() + 5.0, header_rect.center().y),
         egui::Align2::LEFT_CENTER,
         arrow,
         egui::FontId::proportional(12.0),
@@ -388,8 +411,34 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
         }
     }
 
+    header_resp.context_menu(|ui| {
+        let mut on = solo;
+        if ui.checkbox(&mut on, "Solo mode").on_hover_text("Opening a section closes the others").clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_solo_toggle"), true));
+            ui.close();
+        }
+    });
     if header_resp.clicked() && !eye_clicked {
         state.toggle(ui);
+        if state.is_open() {
+            if solo {
+                let others: Vec<egui::Id> = ui.ctx().data(|d| d.get_temp::<Vec<egui::Id>>(all_id).unwrap_or_default());
+                for o in others.into_iter().filter(|o| *o != id) {
+                    let mut st = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), o, false);
+                    st.set_open(false);
+                    st.store(ui.ctx());
+                }
+            }
+            // bring a section opened near the bottom into view, for the frames
+            // its body takes to open
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_scroll_to"), (id, 20u8)));
+        }
+    }
+    let pending = ui.ctx().data(|d| d.get_temp::<(egui::Id, u8)>(egui::Id::new("ds_scroll_to")));
+    if let Some((sid, n)) = pending.filter(|(sid, n)| *sid == id && *n > 0) {
+        header_resp.scroll_to_me(Some(egui::Align::TOP));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_scroll_to"), (sid, n - 1)));
+        ui.ctx().request_repaint();
     }
 
     let r = state.show_body_unindented(ui, |ui| {
@@ -413,13 +462,16 @@ pub struct CurveEdit<'a> {
     pub color: Color32,
     pub hist: Option<&'a [u32]>,
     pub id: egui::Id,
+    /// Draw the curve only (the parametric curve is set by its sliders).
+    pub read_only: bool,
 }
 
 /// Point curve editor (0..255). Click adds a point, drag moves, drag out or
 /// double-click removes. Returns true if changed.
 pub fn curve_editor(ui: &mut egui::Ui, ce: CurveEdit, overlay_luts: &[(&darkslide_core::pipeline::curves::Lut, Color32)]) -> bool {
     let size = ui.available_width().min(300.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click_and_drag());
+    let sense = if ce.read_only { Sense::hover() } else { Sense::click_and_drag() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), sense);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, crate::theme::pal().well);
     if let Some(h) = ce.hist {
@@ -456,7 +508,8 @@ pub fn curve_editor(ui: &mut egui::Ui, ce: CurveEdit, overlay_luts: &[(&darkslid
     let mut dragging: Option<usize> = ui.ctx().data(|d| d.get_temp(drag_id));
     let pts = ce.points;
     if resp.drag_started() || resp.clicked() {
-        if let Some(p) = resp.interact_pointer_pos() {
+        // hit-test where the press began, not past the drag threshold
+        if let Some(p) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()) {
             let near = pts
                 .iter()
                 .enumerate()
@@ -539,13 +592,13 @@ pub fn curve_editor(ui: &mut egui::Ui, ce: CurveEdit, overlay_luts: &[(&darkslid
             .collect();
         painter.add(egui::Shape::line(line, Stroke::new(1.6, ce.color)));
     }
-    for (i, p) in pts.iter().enumerate() {
+    for (i, p) in pts.iter().enumerate().filter(|_| !ce.read_only) {
         let sp = to_screen(*p);
         let active = dragging == Some(i);
         painter.circle_filled(sp, if active { 5.0 } else { 4.0 }, if active { Color32::WHITE } else { ce.color });
         painter.circle_stroke(sp, 4.5, Stroke::new(1.0, Color32::BLACK));
     }
-    if let Some(hp) = resp.hover_pos() {
+    if let Some(hp) = resp.hover_pos().filter(|_| !ce.read_only) {
         let v = from_screen(hp);
         painter.text(
             rect.left_top() + vec2(4.0, 4.0),

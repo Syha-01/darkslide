@@ -124,9 +124,10 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         ui.add_space(6.0);
         let shown = s.profile.strip_prefix("dcp:").map(|p| dcp_name(p)).unwrap_or_else(|| s.profile.clone());
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Profile").size(12.0));
+            // same label width as Look, so the two combos line up
+            ui.add_sized([40.0, 18.0], egui::Label::new(RichText::new("Profile").size(12.0)));
             let full_w = ui.available_width();
-            egui::ComboBox::from_id_salt("profile").width((full_w - 36.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("profile").width((full_w - 36.0).max(60.0)).height(520.0).selected_text(shown).show_ui(ui, |ui| {
                 let mut group = "";
                 for p in PROFILES {
                     if p.group != group {
@@ -169,8 +170,8 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         ui.add_space(4.0);
         let look_name = s.look.as_ref().map(|l| l.name.clone()).unwrap_or_else(|| "None".into());
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Look").size(12.0));
-            egui::ComboBox::from_id_salt("look").width((ui.available_width() - 36.0).max(60.0)).selected_text(look_name).show_ui(ui, |ui| {
+            ui.add_sized([40.0, 18.0], egui::Label::new(RichText::new("Look").size(12.0)));
+            egui::ComboBox::from_id_salt("look").width((ui.available_width() - 36.0).max(60.0)).height(520.0).selected_text(look_name).show_ui(ui, |ui| {
                 if ui.selectable_label(s.look.is_none(), "None").clicked() {
                     s.look = None;
                 }
@@ -195,7 +196,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     }
                 }
             });
-            if ui.button("+").on_hover_text("Import a .cube LUT as a profile").clicked() {
+            if ui.button(ic::PLUS).on_hover_text("Import a .cube LUT as a look").clicked() {
                 pc.actions.push(Action::ImportLook);
             }
         });
@@ -211,12 +212,13 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     let mut light_on = s.panels.basic;
     section(ui, "Light", Some(&mut light_on), true, |ui| {
         let max_ev = if s.hdr.enabled { 10.0 } else { 5.0 };
-        slider(ui, &mut s.exposure, SliderSpec::new("Exposure", -max_ev, max_ev, 0.0).dec(2));
-        slider(ui, &mut s.contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
-        slider(ui, &mut s.blacks, SliderSpec::new("Blacks", -100.0, 100.0, 0.0));
+        use widgets::AltPreview::{Highlights as Hi, Shadows as Sh};
+        slider(ui, &mut s.exposure, SliderSpec::new("Exposure", -max_ev, max_ev, 0.0).dec(2).auto().alt(Hi));
+        slider(ui, &mut s.contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0).auto());
+        slider(ui, &mut s.highlights, SliderSpec::new("Highlights", -100.0, 100.0, 0.0).auto().alt(Hi));
+        slider(ui, &mut s.shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0).auto().alt(Sh));
+        slider(ui, &mut s.whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0).auto().alt(Hi));
+        slider(ui, &mut s.blacks, SliderSpec::new("Blacks", -100.0, 100.0, 0.0).auto().alt(Sh));
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -226,7 +228,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             }
         });
         if s.hdr.enabled {
-            slider(ui, &mut s.hdr.max_headroom, SliderSpec::new("HDR headroom", 1.0, 4.0, 4.0).dec(1).suffix(" st"));
+            slider(ui, &mut s.hdr.max_headroom, SliderSpec::new("HDR headroom", 1.0, 4.0, 4.0).dec(1).suffix(" stops"));
             ui.collapsing("SDR settings", |ui| {
                 slider(ui, &mut s.hdr.sdr_brightness, SliderSpec::new("Brightness", -100.0, 100.0, 0.0));
                 slider(ui, &mut s.hdr.sdr_contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
@@ -270,18 +272,18 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         let gti = widgets::grad_tint();
         let (def_t, def_ti) = engine.resolved_temp_tint(&DevelopSettings { wb_mode: WbMode::AsShot, ..s.clone() });
         let tchg = if is_raw {
-            slider(ui, &mut t, SliderSpec::new("Temperature", 1500.0, 50000.0, def_t).grad(&gt).log())
+            slider(ui, &mut t, SliderSpec::new("Temperature", 1500.0, 50000.0, def_t).grad(&gt).log().auto())
         } else {
-            slider(ui, &mut t, SliderSpec::new("Temperature", -100.0, 100.0, 0.0).grad(&gt))
+            slider(ui, &mut t, SliderSpec::new("Temperature", -100.0, 100.0, 0.0).grad(&gt).auto())
         };
-        let tichg = slider(ui, &mut ti, SliderSpec::new("Tint", -150.0, 150.0, def_ti).grad(&gti));
+        let tichg = slider(ui, &mut ti, SliderSpec::new("Tint", -150.0, 150.0, def_ti).grad(&gti).auto());
         if tchg || tichg {
             s.wb_mode = WbMode::Custom;
             s.temperature = t;
             s.tint = ti;
         }
 
-        slider(ui, &mut s.vibrance, SliderSpec::new("Vibrance", -100.0, 100.0, 0.0));
+        slider(ui, &mut s.vibrance, SliderSpec::new("Vibrance", -100.0, 100.0, 0.0).auto());
         slider(ui, &mut s.saturation, SliderSpec::new("Saturation", -100.0, 100.0, 0.0));
     });
     s.panels.color = color_on;
@@ -305,13 +307,13 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                 ui.selectable_value(&mut s.vignette.style, VignetteStyle::PaintOverlay, "Paint overlay");
             });
         let gv = widgets::grad_bw();
-        slider(ui, &mut s.vignette.amount, SliderSpec::new("Vignette", -100.0, 100.0, 0.0).grad(&gv));
+        slider(ui, &mut s.vignette.amount, SliderSpec::new("Amount", -100.0, 100.0, 0.0).grad(&gv));
         slider(ui, &mut s.vignette.midpoint, SliderSpec::new("Midpoint", 0.0, 100.0, 50.0));
         slider(ui, &mut s.vignette.roundness, SliderSpec::new("Roundness", -100.0, 100.0, 0.0));
         slider(ui, &mut s.vignette.feather, SliderSpec::new("Feather", 0.0, 100.0, 50.0));
         slider(ui, &mut s.vignette.highlights, SliderSpec::new("Highlights", 0.0, 100.0, 0.0));
         ui.label(RichText::new("Grain").strong());
-        slider(ui, &mut s.grain.amount, SliderSpec::new("Grain", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.grain.amount, SliderSpec::new("Amount", 0.0, 100.0, 0.0));
         slider(ui, &mut s.grain.size, SliderSpec::new("Size", 0.0, 100.0, 25.0));
         slider(ui, &mut s.grain.roughness, SliderSpec::new("Roughness", 0.0, 100.0, 50.0));
     });
@@ -321,15 +323,16 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     let mut curve_on = s.panels.curve;
     section(ui, "Curve", Some(&mut curve_on), false, |ui| {
         ui.horizontal(|ui| {
-            for (m, lab, col) in [
-                (CurveMode::Parametric, "◐", Color32::GRAY),
-                (CurveMode::Rgb, "⚪", Color32::WHITE),
-                (CurveMode::Red, "●", Color32::from_rgb(230, 70, 70)),
-                (CurveMode::Green, "●", Color32::from_rgb(70, 200, 70)),
-                (CurveMode::Blue, "●", Color32::from_rgb(80, 120, 240)),
+            ui.spacing_mut().item_spacing.x = 3.0;
+            for (m, lab, col, tip) in [
+                (CurveMode::Parametric, ic::CHART_LINE, Color32::from_gray(210), "Parametric curve"),
+                (CurveMode::Rgb, "RGB", Color32::WHITE, "Point curve, all channels"),
+                (CurveMode::Red, "R", Color32::from_rgb(235, 90, 90), "Red channel"),
+                (CurveMode::Green, "G", Color32::from_rgb(90, 205, 90), "Green channel"),
+                (CurveMode::Blue, "B", Color32::from_rgb(100, 140, 245), "Blue channel"),
             ] {
-                let txt = RichText::new(lab).color(col).size(15.0);
-                if ui.selectable_label(st.curve_mode == m, txt).clicked() {
+                let txt = RichText::new(lab).color(col).strong();
+                if ui.add(egui::Button::selectable(st.curve_mode == m, txt).min_size(egui::vec2(28.0, 22.0))).on_hover_text(tip).clicked() {
                     st.curve_mode = m;
                 }
             }
@@ -352,7 +355,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                 let snapshot = pts.clone();
                 widgets::curve_editor(
                     ui,
-                    widgets::CurveEdit { points: &mut pts, color: Color32::from_gray(220), hist: lum_hist, id: ui.id().with("pcurve") },
+                    widgets::CurveEdit { points: &mut pts, color: Color32::from_gray(220), hist: lum_hist, id: ui.id().with("pcurve"), read_only: true },
                     &[],
                 );
                 let _ = snapshot;
@@ -378,12 +381,12 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                     CurveMode::Green => (&mut s.curve.green, Color32::from_rgb(70, 200, 70), pc.hist.map(|h| h.g.as_slice())),
                     _ => (&mut s.curve.blue, Color32::from_rgb(80, 120, 240), pc.hist.map(|h| h.b.as_slice())),
                 };
-                widgets::curve_editor(ui, widgets::CurveEdit { points: pts, color: col, hist, id: ui.id().with(("curve", mode as u8)) }, &others_ref);
+                widgets::curve_editor(ui, widgets::CurveEdit { points: pts, color: col, hist, id: ui.id().with(("curve", mode as u8)), read_only: false }, &others_ref);
                 ui.horizontal(|ui| {
                     if ui.small_button("Reset channel").clicked() {
                         *pts = linear_curve();
                     }
-                    ui.label(RichText::new("click: add · drag out: remove").weak().small());
+                    ui.label(RichText::new("Click to add · drag out or double-click to remove").weak().small());
                 });
             }
         }
@@ -394,10 +397,10 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     // ------------------------------------------------------------- Color Mixer
     let mut mixer_on = s.panels.mixer;
     let title = if s.is_bw() { "B&W Mixer" } else { "Color Mixer" };
-    section(ui, title, Some(&mut mixer_on), false, |ui| {
+    widgets::section_id(ui, "Color Mixer", title, Some(&mut mixer_on), false, |ui| {
         if s.is_bw() {
             ui.horizontal(|ui| {
-                if ui.button("Auto").clicked() {
+                if ui.add(egui::Button::selectable(s.auto_gray_mix, "Auto")).on_hover_text("Mix from the photo's colors").clicked() {
                     pc.actions.push(Action::AutoGrayMix);
                 }
                 if ui.button("Default").clicked() {
@@ -461,24 +464,23 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     let mut detail_on = s.panels.detail;
     section(ui, "Detail", Some(&mut detail_on), false, |ui| {
         ui.label(RichText::new("Sharpening").strong());
-        slider(ui, &mut s.sharpen.amount, SliderSpec::new("Sharpening", 0.0, 150.0, if is_raw { 40.0 } else { 0.0 }));
+        slider(ui, &mut s.sharpen.amount, SliderSpec::new("Amount", 0.0, 150.0, if is_raw { 40.0 } else { 0.0 }));
         slider(ui, &mut s.sharpen.radius, SliderSpec::new("Radius", 0.5, 3.0, 1.0).dec(1));
         slider(ui, &mut s.sharpen.detail, SliderSpec::new("Detail", 0.0, 100.0, 25.0));
-        slider(ui, &mut s.sharpen.masking, SliderSpec::new("Masking", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.sharpen.masking, SliderSpec::new("Masking", 0.0, 100.0, 0.0).alt(widgets::AltPreview::SharpenMask));
         ui.label(RichText::new("Noise reduction").strong());
-        slider(ui, &mut s.nr.luminance, SliderSpec::new("Noise reduction", 0.0, 100.0, 0.0));
+        slider(ui, &mut s.nr.luminance, SliderSpec::new("Luminance", 0.0, 100.0, 0.0));
         slider(ui, &mut s.nr.luminance_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
         slider(ui, &mut s.nr.luminance_contrast, SliderSpec::new("Contrast", 0.0, 100.0, 0.0));
-        slider(ui, &mut s.nr.color, SliderSpec::new("Color noise reduction", 0.0, 100.0, if is_raw { 25.0 } else { 0.0 }));
+        slider(ui, &mut s.nr.color, SliderSpec::new("Color", 0.0, 100.0, if is_raw { 25.0 } else { 0.0 }));
         slider(ui, &mut s.nr.color_detail, SliderSpec::new("Detail", 0.0, 100.0, 50.0));
         slider(ui, &mut s.nr.color_smoothness, SliderSpec::new("Smoothness", 0.0, 100.0, 50.0));
         ui.label(RichText::new("Enhance").strong());
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut s.enhance.denoise, "Denoise");
-            if s.enhance.denoise {
-                ui.add(egui::Slider::new(&mut s.enhance.denoise_amount, 0.0..=100.0).show_value(true));
-            }
-        });
+        if ui.checkbox(&mut s.enhance.denoise, "Denoise").changed() && s.enhance.denoise && s.enhance.denoise_amount == 0.0 {
+            // a zero amount would look like nothing happened
+            s.enhance.denoise_amount = 50.0;
+        }
+        ui.add_enabled_ui(s.enhance.denoise, |ui| slider(ui, &mut s.enhance.denoise_amount, SliderSpec::new("Denoise amount", 0.0, 100.0, 50.0)));
         ui.checkbox(&mut s.enhance.raw_details, "Raw Details").on_hover_text("Higher quality demosaic for finer detail");
         ui.checkbox(&mut s.enhance.super_resolution, "Super Resolution (2×)").on_hover_text("Doubles linear resolution on export");
     });
@@ -526,15 +528,29 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         slider(ui, &mut s.lens.defringe_green_amount, SliderSpec::new("Green amount", 0.0, 20.0, 0.0));
         slider(ui, &mut s.lens.defringe_green_hue[0], SliderSpec::new("Green hue (low)", 0.0, 90.0, 40.0).grad(&gg));
         slider(ui, &mut s.lens.defringe_green_hue[1], SliderSpec::new("Green hue (high)", 10.0, 100.0, 60.0).grad(&gg));
+        // a hue range needs low below high
+        for r in [&mut s.lens.defringe_purple_hue, &mut s.lens.defringe_green_hue] {
+            if r[0] > r[1] - 10.0 {
+                r[1] = (r[0] + 10.0).min(100.0);
+                r[0] = r[0].min(r[1] - 10.0);
+            }
+        }
         ui.label(RichText::new("Lens Blur").strong());
         ui.checkbox(&mut s.lens_blur.enabled, "Apply lens blur");
         if s.lens_blur.enabled {
             slider(ui, &mut s.lens_blur.amount, SliderSpec::new("Blur amount", 0.0, 100.0, 50.0));
             ui.horizontal(|ui| {
                 ui.label("Bokeh");
-                egui::ComboBox::from_id_salt("bokeh").selected_text(format!("{:?}", s.lens_blur.shape)).show_ui(ui, |ui| {
+                let name = |b: BokehShape| match b {
+                    BokehShape::Circle => "Circle",
+                    BokehShape::Bubble => "Bubble",
+                    BokehShape::FiveBlade => "5-blade",
+                    BokehShape::Ring => "Ring",
+                    BokehShape::CatEye => "Cat eye",
+                };
+                egui::ComboBox::from_id_salt("bokeh").selected_text(name(s.lens_blur.shape)).show_ui(ui, |ui| {
                     for b in [BokehShape::Circle, BokehShape::Bubble, BokehShape::FiveBlade, BokehShape::Ring, BokehShape::CatEye] {
-                        ui.selectable_value(&mut s.lens_blur.shape, b, format!("{b:?}"));
+                        ui.selectable_value(&mut s.lens_blur.shape, b, name(b));
                     }
                 });
             });
@@ -714,36 +730,40 @@ pub fn point_color_ui_ext(ui: &mut egui::Ui, pcs: &mut Vec<PointColor>, sel: &mu
 }
 
 pub fn grading_ui(ui: &mut egui::Ui, g: &mut ColorGrading, view: &mut u8, id: &str) {
-    ui.horizontal(|ui| {
-        for (i, t) in ["◔◑◕", "Shadows", "Midtones", "Highlights", "Global"].iter().enumerate() {
+    let w = ui.available_width();
+    // wraps rather than widening the panel
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (i, t) in ["3-way", "Shadows", "Midtones", "Highlights", "Global"].iter().enumerate() {
             ui.selectable_value(view, i as u8, *t);
         }
     });
-    let w = ui.available_width();
     let wheel = |ui: &mut egui::Ui, wh: &mut Wheel, title: &str, size: f32| {
-        ui.vertical(|ui| {
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(size + 10.0);
             ui.label(RichText::new(title).small());
             widgets::color_wheel(ui, &mut wh.hue, &mut wh.sat, size, ui.id().with((id, title)));
-            ui.add(egui::DragValue::new(&mut wh.hue).range(0.0..=359.0).prefix("H ").speed(1.0));
-            ui.add(egui::DragValue::new(&mut wh.sat).range(0.0..=100.0).prefix("S ").speed(0.5));
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut wh.hue).range(0.0..=359.0).prefix("H ").speed(1.0).fixed_decimals(0));
+                ui.add(egui::DragValue::new(&mut wh.sat).range(0.0..=100.0).prefix("S ").speed(0.5).fixed_decimals(0));
+            });
             let gl = widgets::grad_bw();
-            ui.set_max_width(size + 10.0);
-            slider(ui, &mut wh.lum, SliderSpec::new("Lum", -100.0, 100.0, 0.0).grad(&gl));
+            slider(ui, &mut wh.lum, SliderSpec::new("Luminance", -100.0, 100.0, 0.0).grad(&gl));
         });
     };
     match *view {
         0 => {
-            let sz = ((w - 20.0) / 2.0).min(110.0);
-            ui.vertical_centered(|ui| wheel(ui, &mut g.midtones, "Midtones", sz));
-            ui.horizontal(|ui| {
-                wheel(ui, &mut g.shadows, "Shadows", sz);
-                wheel(ui, &mut g.highlights, "Highlights", sz);
+            let sz = ((w - 24.0) / 2.0 - 10.0).clamp(60.0, 110.0);
+            wheel(ui, &mut g.midtones, "Midtones", sz);
+            ui.columns(2, |cols| {
+                wheel(&mut cols[0], &mut g.shadows, "Shadows", sz);
+                wheel(&mut cols[1], &mut g.highlights, "Highlights", sz);
             });
         }
-        1 => wheel(ui, &mut g.shadows, "Shadows", (w - 20.0).min(220.0)),
-        2 => wheel(ui, &mut g.midtones, "Midtones", (w - 20.0).min(220.0)),
-        3 => wheel(ui, &mut g.highlights, "Highlights", (w - 20.0).min(220.0)),
-        _ => wheel(ui, &mut g.global, "Global", (w - 20.0).min(220.0)),
+        1 => wheel(ui, &mut g.shadows, "Shadows", (w - 30.0).min(220.0)),
+        2 => wheel(ui, &mut g.midtones, "Midtones", (w - 30.0).min(220.0)),
+        3 => wheel(ui, &mut g.highlights, "Highlights", (w - 30.0).min(220.0)),
+        _ => wheel(ui, &mut g.global, "Global", (w - 30.0).min(220.0)),
     }
     slider(ui, &mut g.blending, SliderSpec::new("Blending", 0.0, 100.0, 50.0));
     slider(ui, &mut g.balance, SliderSpec::new("Balance", -100.0, 100.0, 0.0));

@@ -785,7 +785,12 @@ impl App {
                             d.settings.transform.upright = mode;
                             self.status = "Upright applied".into();
                         }
-                        None => self.status = "Upright: not enough lines found".into(),
+                        None => {
+                            // nothing applied, so don't leave the mode looking selected
+                            d.settings.transform.upright = darkslide_core::params::Upright::Off;
+                            d.settings.transform.upright_matrix = None;
+                            self.status = "Upright: not enough straight lines found. Try Guided and draw the lines.".into();
+                        }
                     }
                 }
                 Action::ImportLook => {
@@ -1600,7 +1605,8 @@ impl App {
         };
         let hist = self.hist.clone();
         let mut actions = vec![];
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // a scrollbar that's always there says when more is below
+        egui::ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
             let doc = &mut self.docs[ci];
             if let Some(err) = &doc.load_error {
                 ui.colored_label(Color32::from_rgb(230, 90, 90), format!("Cannot open: {err}"));
@@ -1822,6 +1828,11 @@ impl eframe::App for App {
                 self.tools.straighten = false;
             }
             self.prev_tool = self.tools.tool;
+        }
+        crate::widgets::set_solo(&ctx, self.prefs.solo_sections);
+        if crate::widgets::take_solo_toggle(&ctx) {
+            self.prefs.solo_sections = !self.prefs.solo_sections;
+            self.prefs.save();
         }
         self.shortcuts(&ctx);
         // the mask overlay is coloured when a render arrives; a new colour needs one

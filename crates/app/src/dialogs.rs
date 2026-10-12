@@ -35,11 +35,13 @@ pub struct Prefs {
     pub ui_scale: f32,
     /// Index into theme::NAMES.
     pub theme: u8,
+    /// Opening an Edit section closes the others.
+    pub solo_sections: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { autosave_sidecars: true, show_vectorscope: false, export: ExportSettings::default(), ui_scale: 1.0, theme: 0 }
+        Self { autosave_sidecars: true, show_vectorscope: false, export: ExportSettings::default(), ui_scale: 1.0, theme: 0, solo_sections: false }
     }
 }
 
@@ -596,6 +598,7 @@ fn prefs_window(app: &mut App, ctx: &egui::Context) {
         heading(ui, "General");
         ui.checkbox(&mut app.prefs.autosave_sidecars, "Save settings to XMP sidecars automatically");
         ui.checkbox(&mut app.edit.show_scope, "Show vectorscope under the histogram");
+        ui.checkbox(&mut app.prefs.solo_sections, "Solo mode: opening a panel section closes the others");
         heading(ui, "Appearance");
         egui::Grid::new("prefs_look").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
             ui.label("Theme");
