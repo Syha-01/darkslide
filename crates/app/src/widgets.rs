@@ -7,7 +7,216 @@ use darkslide_core::analysis::Histogram;
 use darkslide_core::params::CurvePoints;
 use darkslide_core::pipeline::curves::Spline;
 
-pub const ACCENT: Color32 = Color32::from_rgb(0x2d, 0x8c, 0xeb);
+pub const ACCENT: Color32 = Color32::from_rgb(20, 115, 230); // Adobe Blue #1473e6
+#[allow(dead_code)]
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(13, 102, 208);
+#[allow(dead_code)]
+pub const ACCENT_ACTIVE: Color32 = Color32::from_rgb(9, 90, 186);
+
+#[allow(dead_code)]
+pub const BG_APP: Color32 = Color32::from_rgb(22, 22, 22);
+#[allow(dead_code)]
+pub const BG_PANEL: Color32 = Color32::from_rgb(34, 34, 34);
+#[allow(dead_code)]
+pub const BG_HEADER: Color32 = Color32::from_rgb(28, 28, 28);
+#[allow(dead_code)]
+pub const BG_TOOLBAR: Color32 = Color32::from_rgb(25, 25, 25);
+#[allow(dead_code)]
+pub const BG_INPUT: Color32 = Color32::from_rgb(18, 18, 18);
+
+#[allow(dead_code)]
+pub const BORDER_DARK: Color32 = Color32::from_rgb(46, 46, 46);
+#[allow(dead_code)]
+pub const BORDER_LIGHT: Color32 = Color32::from_rgb(60, 60, 60);
+
+pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(225, 225, 225);
+#[allow(dead_code)]
+pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(155, 155, 155);
+#[allow(dead_code)]
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(110, 110, 110);
+
+use crate::tool_panels::Tool;
+
+pub fn draw_tool_icon(painter: &egui::Painter, tool: Tool, center: Pos2, size: f32, color: Color32) {
+    match tool {
+        Tool::Edit => {
+            let w = size * 0.65;
+            let h_spacing = size * 0.22;
+            let y0 = center.y - h_spacing;
+            let y1 = center.y;
+            let y2 = center.y + h_spacing;
+            let x_left = center.x - w / 2.0;
+            let x_right = center.x + w / 2.0;
+            let stroke = Stroke::new(1.3, color);
+
+            painter.line_segment([pos2(x_left, y0), pos2(x_right, y0)], stroke);
+            let k1_x = center.x - w * 0.20;
+            painter.rect_filled(Rect::from_center_size(pos2(k1_x, y0), vec2(3.5, 6.0)), 1.0, color);
+
+            painter.line_segment([pos2(x_left, y1), pos2(x_right, y1)], stroke);
+            let k2_x = center.x + w * 0.22;
+            painter.rect_filled(Rect::from_center_size(pos2(k2_x, y1), vec2(3.5, 6.0)), 1.0, color);
+
+            painter.line_segment([pos2(x_left, y2), pos2(x_right, y2)], stroke);
+            let k3_x = center.x - w * 0.05;
+            painter.rect_filled(Rect::from_center_size(pos2(k3_x, y2), vec2(3.5, 6.0)), 1.0, color);
+        }
+        Tool::Crop => {
+            let s = size * 0.32;
+            let stroke = Stroke::new(1.5, color);
+            let tl_x = center.x - s;
+            let tl_y = center.y - s;
+            let br_x = center.x + s;
+            let br_y = center.y + s;
+            let ext = s * 0.40;
+            painter.line_segment([pos2(tl_x, tl_y - ext), pos2(tl_x, br_y)], stroke);
+            painter.line_segment([pos2(tl_x - ext, tl_y), pos2(br_x, tl_y)], stroke);
+            painter.line_segment([pos2(br_x, tl_y), pos2(br_x, br_y + ext)], stroke);
+            painter.line_segment([pos2(tl_x, br_y), pos2(br_x + ext, br_y)], stroke);
+        }
+        Tool::Remove => {
+            let a = 40.0f32.to_radians();
+            let cos_a = a.cos();
+            let sin_a = a.sin();
+            let len = size * 0.38;
+            let width = size * 0.17;
+            let p1 = center - vec2(len * cos_a, len * sin_a);
+            let p2 = center + vec2(len * cos_a, len * sin_a);
+            painter.line_segment([p1, p2], Stroke::new(width * 2.0, color.gamma_multiply(0.25)));
+            painter.add(egui::Shape::line(
+                vec![
+                    p1 + vec2(-width * sin_a, width * cos_a),
+                    p2 + vec2(-width * sin_a, width * cos_a),
+                    p2 + vec2(width * sin_a, -width * cos_a),
+                    p1 + vec2(width * sin_a, -width * cos_a),
+                    p1 + vec2(-width * sin_a, width * cos_a),
+                ],
+                Stroke::new(1.3, color),
+            ));
+            painter.circle_filled(center, 1.2, color);
+            painter.circle_filled(center - vec2(3.2 * cos_a, 3.2 * sin_a), 1.0, color);
+            painter.circle_filled(center + vec2(3.2 * cos_a, 3.2 * sin_a), 1.0, color);
+        }
+        Tool::Masking => {
+            let r = size * 0.35;
+            let segs = 12;
+            for i in 0..segs {
+                if i % 2 == 0 {
+                    let a1 = i as f32 / segs as f32 * std::f32::consts::TAU;
+                    let a2 = (i as f32 + 0.65) / segs as f32 * std::f32::consts::TAU;
+                    painter.line_segment([center + vec2(a1.cos(), a1.sin()) * r, center + vec2(a2.cos(), a2.sin()) * r], Stroke::new(1.4, color));
+                }
+            }
+            painter.circle_filled(center, r * 0.48, color);
+        }
+        Tool::RedEye => {
+            let w = size * 0.40;
+            let h = size * 0.22;
+            let pts_top = vec![
+                center + vec2(-w, 0.0),
+                center + vec2(-w * 0.5, -h),
+                center + vec2(w * 0.5, -h),
+                center + vec2(w, 0.0),
+            ];
+            let pts_bot = vec![
+                center + vec2(w, 0.0),
+                center + vec2(w * 0.5, h),
+                center + vec2(-w * 0.5, h),
+                center + vec2(-w, 0.0),
+            ];
+            painter.add(egui::Shape::line(pts_top, Stroke::new(1.3, color)));
+            painter.add(egui::Shape::line(pts_bot, Stroke::new(1.3, color)));
+            painter.circle_stroke(center, h * 0.72, Stroke::new(1.2, color));
+            painter.circle_filled(center, h * 0.35, color);
+        }
+        Tool::Snapshots => {
+            let w = size * 0.35;
+            let h = size * 0.24;
+            let rect = Rect::from_center_size(center + vec2(0.0, 1.0), vec2(w * 2.0, h * 2.0));
+            painter.rect_stroke(rect, 2.0, Stroke::new(1.3, color), StrokeKind::Inside);
+            painter.circle_stroke(rect.center(), h * 0.55, Stroke::new(1.2, color));
+            let top_w = w * 0.42;
+            let top_h = 3.0;
+            let top_r = Rect::from_min_max(pos2(center.x - top_w, rect.top() - top_h), pos2(center.x + top_w, rect.top()));
+            painter.rect_filled(top_r, 1.0, color);
+        }
+        Tool::Presets => {
+            let r = size * 0.22;
+            let offset = size * 0.12;
+            painter.circle_stroke(center - vec2(offset, 0.0), r, Stroke::new(1.3, color));
+            painter.circle_stroke(center + vec2(offset, 0.0), r, Stroke::new(1.3, color));
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn draw_eyeball(painter: &egui::Painter, center: Pos2, size: f32, open: bool, color: Color32) {
+    let w = size * 0.45;
+    let h = size * 0.26;
+    let pts_top = vec![
+        center + vec2(-w, 0.0),
+        center + vec2(-w * 0.5, -h),
+        center + vec2(w * 0.5, -h),
+        center + vec2(w, 0.0),
+    ];
+    let pts_bot = vec![
+        center + vec2(w, 0.0),
+        center + vec2(w * 0.5, h),
+        center + vec2(-w * 0.5, h),
+        center + vec2(-w, 0.0),
+    ];
+    let stroke = Stroke::new(1.2, color);
+    painter.add(egui::Shape::line(pts_top, stroke));
+    painter.add(egui::Shape::line(pts_bot, stroke));
+    if open {
+        painter.circle_filled(center, h * 0.55, color);
+    } else {
+        painter.line_segment([center + vec2(-w * 0.85, -h * 1.1), center + vec2(w * 0.85, h * 1.1)], Stroke::new(1.3, color));
+    }
+}
+
+pub fn draw_icon_eyedropper(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
+    let s = size * 0.38;
+    let a = (-45.0f32).to_radians();
+    let dir = vec2(a.cos(), a.sin());
+    let normal = vec2(-dir.y, dir.x);
+    let tip = center + dir * s;
+    let bulb = center - dir * s;
+    let barrel1 = tip - dir * (s * 0.4) + normal * 2.0;
+    let barrel2 = tip - dir * (s * 0.4) - normal * 2.0;
+    let bulb1 = bulb + normal * 2.8;
+    let bulb2 = bulb - normal * 2.8;
+    painter.line_segment([tip, barrel1], Stroke::new(1.2, color));
+    painter.line_segment([tip, barrel2], Stroke::new(1.2, color));
+    painter.line_segment([barrel1, bulb1], Stroke::new(1.2, color));
+    painter.line_segment([barrel2, bulb2], Stroke::new(1.2, color));
+    painter.line_segment([bulb1, bulb2], Stroke::new(1.2, color));
+    painter.circle_filled(tip + dir * 2.5, 1.2, color);
+}
+
+pub fn eyedropper_button(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 20.0), Sense::click());
+    let painter = ui.painter_at(rect);
+    if active {
+        painter.rect_filled(rect, 3.0, ACCENT);
+        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(50, 140, 245)), egui::StrokeKind::Inside);
+    } else if resp.hovered() {
+        painter.rect_filled(rect, 3.0, Color32::from_rgb(48, 48, 48));
+        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(68, 68, 68)), egui::StrokeKind::Inside);
+    } else {
+        painter.rect_filled(rect, 3.0, Color32::from_rgb(34, 34, 34));
+        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgb(48, 48, 48)), egui::StrokeKind::Inside);
+    }
+    let icon_col = if active {
+        Color32::WHITE
+    } else if resp.hovered() {
+        Color32::from_rgb(240, 240, 240)
+    } else {
+        Color32::from_rgb(175, 175, 175)
+    };
+    draw_icon_eyedropper(&painter, rect.center(), 14.0, icon_col);
+    resp.on_hover_text(tooltip).clicked()
+}
 
 /// Set by sliders while a drag is in progress so renders can go fast.
 pub fn mark_interacting(ui: &egui::Ui) {
@@ -107,7 +316,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     let width = ui.available_width();
     ui.horizontal(|ui| {
         ui.set_width(width);
-        let lab = ui.add(egui::Label::new(egui::RichText::new(spec.label).size(12.5)).sense(Sense::click()));
+        let lab = ui.add(egui::Label::new(egui::RichText::new(spec.label).size(12.5).color(TEXT_PRIMARY)).sense(Sense::click()));
         if lab.double_clicked() && ui.input(|i| i.modifiers.shift) {
             // shift + double-click: auto for this slider only (ACR)
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
@@ -115,7 +324,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             *value = spec.default;
             changed = true;
         }
-        lab.on_hover_text("Double-click to reset");
+        lab.on_hover_text("Double-click to reset, Shift+double-click for Auto");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut v = *value;
             let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
@@ -124,7 +333,15 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
                 let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
                 format!("{s}{}", spec.suffix)
             });
-            let r = ui.add_sized([56.0, 18.0], dv);
+            let r = ui.scope(|ui| {
+                ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(20, 20, 20);
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(44, 44, 44));
+                ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(28, 28, 28);
+                ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
+                ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(16, 16, 16);
+                ui.visuals_mut().widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+                ui.add_sized([48.0, 18.0], dv)
+            }).inner;
             if r.dragged() {
                 mark_interacting(ui);
             }
@@ -135,9 +352,9 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
         });
     });
     // track
-    let h = 14.0;
+    let h = 13.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(width, h), Sense::click_and_drag());
-    let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 10.0, 3.0));
+    let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 8.0, 3.0));
     let painter = ui.painter_at(rect.expand(2.0));
     match spec.gradient {
         Some(stops) if stops.len() >= 2 => {
@@ -156,20 +373,24 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             painter.add(egui::Shape::mesh(mesh));
         }
         _ => {
-            painter.rect_filled(track, 1.5, ui.visuals().widgets.inactive.bg_fill.gamma_multiply(1.6));
-            // fill from the default to the current value
+            painter.rect_filled(track, 1.5, Color32::from_rgb(26, 26, 26));
             let t0 = to_t(&spec, spec.default);
             let t1 = to_t(&spec, *value);
             let x0 = track.left() + track.width() * t0.min(t1);
             let x1 = track.left() + track.width() * t0.max(t1);
-            painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, track.y_range()), 1.5, ACCENT.gamma_multiply(0.7));
+            painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, track.y_range()), 1.5, ACCENT.gamma_multiply(0.85));
+            if spec.min < spec.default && spec.max > spec.default {
+                let cx = track.left() + track.width() * t0;
+                painter.line_segment([pos2(cx, track.top() - 1.5), pos2(cx, track.bottom() + 1.5)], Stroke::new(1.0, Color32::from_rgb(100, 100, 100)));
+            }
         }
     }
     let t = to_t(&spec, *value);
     let hx = track.left() + track.width() * t;
-    let handle_col = if resp.hovered() || resp.dragged() { Color32::WHITE } else { Color32::from_gray(210) };
+    let handle_col = if resp.hovered() || resp.dragged() { Color32::WHITE } else { Color32::from_rgb(238, 238, 238) };
     painter.circle_filled(pos2(hx, rect.center().y), 5.5, handle_col);
-    painter.circle_stroke(pos2(hx, rect.center().y), 5.5, Stroke::new(1.0, Color32::from_gray(60)));
+    painter.circle_stroke(pos2(hx, rect.center().y), 5.5, Stroke::new(1.0, Color32::from_rgb(32, 32, 32)));
+    painter.circle_stroke(pos2(hx, rect.center().y), 6.5, Stroke::new(1.0, Color32::from_black_alpha(70)));
     if resp.double_clicked() {
         if *value != spec.default {
             *value = spec.default;
@@ -501,24 +722,34 @@ pub struct HistResp {
 
 pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h: bool) -> HistResp {
     let w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(w, 110.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 112.0), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, Color32::from_gray(22));
+    painter.rect_filled(rect, 4.0, Color32::from_rgb(18, 18, 18));
+    painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(44, 44, 44)), StrokeKind::Inside);
+    
+    // Internal tonal grid lines
+    let grid_stroke = Stroke::new(1.0, Color32::from_rgb(26, 26, 26));
+    for f in [0.25f32, 0.50, 0.75] {
+        let gx = rect.left() + rect.width() * f;
+        painter.line_segment([pos2(gx, rect.top() + 1.0), pos2(gx, rect.bottom() - 1.0)], grid_stroke);
+    }
+    painter.line_segment([pos2(rect.left() + 1.0, rect.center().y), pos2(rect.right() - 1.0, rect.center().y)], grid_stroke);
+
     let mut out = HistResp { toggle_shadows: false, toggle_highlights: false };
     if let Some(h) = h {
         let max = [&h.r, &h.g, &h.b].iter().flat_map(|c| c[1..255].iter()).copied().max().unwrap_or(1).max(1) as f32;
         let chans = [
-            (&h.r, Color32::from_rgba_unmultiplied(230, 60, 60, 110)),
-            (&h.g, Color32::from_rgba_unmultiplied(60, 210, 60, 110)),
-            (&h.b, Color32::from_rgba_unmultiplied(70, 110, 255, 110)),
+            (&h.r, Color32::from_rgba_unmultiplied(235, 60, 60, 110)),
+            (&h.g, Color32::from_rgba_unmultiplied(60, 215, 60, 110)),
+            (&h.b, Color32::from_rgba_unmultiplied(65, 130, 255, 110)),
         ];
         for (data, col) in chans {
             let mut mesh = egui::Mesh::default();
             for i in 0..256 {
                 let x = rect.left() + rect.width() * i as f32 / 255.0;
                 let v = (data[i] as f32 / max).min(1.0);
-                mesh.colored_vertex(pos2(x, rect.bottom()), col);
-                mesh.colored_vertex(pos2(x, rect.bottom() - v * (rect.height() - 6.0)), col);
+                mesh.colored_vertex(pos2(x, rect.bottom() - 1.0), col);
+                mesh.colored_vertex(pos2(x, rect.bottom() - 1.0 - v * (rect.height() - 8.0)), col);
                 if i > 0 {
                     let b = (i * 2) as u32;
                     mesh.add_triangle(b - 2, b - 1, b);
@@ -529,16 +760,29 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
         }
         // clipping indicators
         let tri = |left: bool, active: bool, clipped: bool| {
-            let c = if active {
-                Color32::WHITE
-            } else if clipped {
-                Color32::from_gray(170)
+            let btn_r = if left {
+                Rect::from_min_size(pos2(rect.left() + 3.0, rect.top() + 3.0), vec2(15.0, 15.0))
             } else {
-                Color32::from_gray(70)
+                Rect::from_min_size(pos2(rect.right() - 18.0, rect.top() + 3.0), vec2(15.0, 15.0))
             };
-            let (x, dir) = if left { (rect.left() + 4.0, 1.0) } else { (rect.right() - 4.0, -1.0) };
-            let y = rect.top() + 4.0;
-            painter.add(egui::Shape::convex_polygon(vec![pos2(x, y), pos2(x + dir * 10.0, y), pos2(x, y + 10.0)], c, Stroke::NONE));
+            let bg = if active {
+                if left { Color32::from_rgb(20, 60, 120) } else { Color32::from_rgb(120, 25, 25) }
+            } else {
+                Color32::from_rgb(28, 28, 28)
+            };
+            painter.rect_filled(btn_r, 2.0, bg);
+            painter.rect_stroke(btn_r, 2.0, Stroke::new(1.0, Color32::from_rgb(50, 50, 50)), StrokeKind::Inside);
+            
+            let c = if active {
+                if left { Color32::from_rgb(80, 170, 255) } else { Color32::from_rgb(255, 80, 80) }
+            } else if clipped {
+                Color32::from_rgb(190, 190, 190)
+            } else {
+                Color32::from_rgb(85, 85, 85)
+            };
+            let (tx, dir) = if left { (btn_r.left() + 3.0, 1.0) } else { (btn_r.right() - 3.0, -1.0) };
+            let ty = btn_r.top() + 3.0;
+            painter.add(egui::Shape::convex_polygon(vec![pos2(tx, ty), pos2(tx + dir * 9.0, ty), pos2(tx, ty + 9.0)], c, Stroke::NONE));
         };
         tri(true, show_s, h.clip_shadows);
         tri(false, show_h, h.clip_highlights);
@@ -546,10 +790,10 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
     let resp = ui.interact(rect, ui.id().with("histclick"), Sense::click());
     if resp.clicked() {
         if let Some(p) = resp.interact_pointer_pos() {
-            if p.y < rect.top() + 18.0 {
-                if p.x < rect.left() + 18.0 {
+            if p.y < rect.top() + 20.0 {
+                if p.x < rect.left() + 22.0 {
                     out.toggle_shadows = true;
-                } else if p.x > rect.right() - 18.0 {
+                } else if p.x > rect.right() - 22.0 {
                     out.toggle_highlights = true;
                 }
             }

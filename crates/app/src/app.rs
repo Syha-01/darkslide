@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use darkslide_core::analysis::Histogram;
 use darkslide_core::params::{DevelopSettings, WbMode};
 use darkslide_core::pipeline::geometry::Region;
-use eframe::egui::{self, Color32, RichText, Vec2};
+use eframe::egui::{self, Color32, Rect, RichText, Stroke, Vec2, pos2, vec2};
 
 use crate::dialogs::{CopyDialog, ExportDialog, ExportStatus, Prefs};
 use crate::doc::{ColorLabel, Doc, Loaded, Loader, scan_folder};
@@ -1154,14 +1154,90 @@ impl App {
             });
             ui.separator();
             if let Some(d) = self.doc() {
-                ui.label(RichText::new(d.name()).strong());
+                ui.label(RichText::new(d.name()).strong().color(Color32::from_rgb(230, 230, 230)));
                 if let Some(e) = &d.engine {
                     let m = &e.source.meta;
-                    ui.label(RichText::new(format!("{} {}", m.make, m.model)).weak());
+                    ui.label(RichText::new(format!("•  {} {}", m.make, m.model)).color(Color32::from_rgb(150, 150, 150)));
                 }
                 if d.dirty {
-                    ui.label(RichText::new("●").color(Color32::from_rgb(230, 170, 60))).on_hover_text("Unsaved settings");
+                    ui.label(RichText::new("●").color(Color32::from_rgb(240, 175, 55))).on_hover_text("Unsaved settings");
                 }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(egui::Button::new("?").frame(false)).on_hover_text("About Darkslide").clicked() {
+                    self.show_about = true;
+                }
+                if ui.add(egui::Button::new("⌨").frame(false)).on_hover_text("Keyboard shortcuts").clicked() {
+                    self.show_shortcuts = true;
+                }
+                if ui.add(egui::Button::new("⚙").frame(false)).on_hover_text("Preferences…").clicked() {
+                    self.show_prefs = true;
+                }
+            });
+        });
+    }
+
+    fn toolbar_strip(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.vertical_centered(|ui| {
+            for (t, _icon, tip) in Tool::ALL {
+                let sel = self.tools.tool == t;
+                let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
+                let p = ui.painter_at(rect);
+
+                if sel {
+                    p.rect_filled(rect, 4.0, Color32::from_rgb(48, 48, 48));
+                    p.rect_filled(Rect::from_min_size(pos2(rect.left(), rect.top() + 7.0), vec2(2.5, 22.0)), 1.0, crate::widgets::ACCENT);
+                } else if resp.hovered() {
+                    p.rect_filled(rect, 4.0, Color32::from_rgb(38, 38, 38));
+                }
+
+                let icon_col = if sel {
+                    Color32::WHITE
+                } else if resp.hovered() {
+                    Color32::from_rgb(225, 225, 225)
+                } else {
+                    Color32::from_rgb(145, 145, 145)
+                };
+
+                crate::widgets::draw_tool_icon(&p, t, rect.center(), 22.0, icon_col);
+
+                if resp.on_hover_text(tip).clicked() {
+                    self.tools.tool = t;
+                    self.pick = Pick::None;
+                }
+                ui.add_space(4.0);
+            }
+
+            ui.add_space(8.0);
+            let sep_y = ui.cursor().top();
+            let w = ui.available_width();
+            ui.painter().line_segment(
+                [pos2(ui.cursor().left() + 6.0, sep_y), pos2(ui.cursor().left() + w - 6.0, sep_y)],
+                Stroke::new(1.0, Color32::from_rgb(44, 44, 44)),
+            );
+            ui.add_space(8.0);
+
+            let (s_rect, s_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
+            if s_resp.hovered() {
+                ui.painter().rect_filled(s_rect, 4.0, Color32::from_rgb(38, 38, 38));
+            }
+            let s_col = if s_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
+            ui.painter().text(s_rect.center(), egui::Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(16.0), s_col);
+            if s_resp.on_hover_text("Preferences…").clicked() {
+                self.show_prefs = true;
+            }
+
+            ui.add_space(4.0);
+            let (f_rect, f_resp) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::click());
+            if f_resp.hovered() {
+                ui.painter().rect_filled(f_rect, 4.0, Color32::from_rgb(38, 38, 38));
+            }
+            let f_col = if f_resp.hovered() || self.fullscreen { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
+            ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, "⛶", egui::FontId::proportional(16.0), f_col);
+            if f_resp.on_hover_text("Full screen (F)").clicked() {
+                self.fullscreen = !self.fullscreen;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
         });
     }
@@ -1177,14 +1253,15 @@ impl App {
         }
         if let Some(d) = self.doc() {
             if let Some(e) = &d.engine {
+                ui.add_space(3.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(e.source.meta.exposure_summary()).small().weak());
+                    ui.label(RichText::new(e.source.meta.exposure_summary()).small().color(Color32::from_rgb(170, 170, 170)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(RichText::new(format!("{} ms", self.render_ms)).small().weak());
                     });
                 });
                 if let Some(l) = &e.source.meta.lens {
-                    ui.label(RichText::new(l).small().weak());
+                    ui.label(RichText::new(l).small().color(Color32::from_rgb(140, 140, 140)));
                 }
             }
         }
@@ -1203,18 +1280,12 @@ impl App {
                 }
             }
         }
-        ui.separator();
-        ui.horizontal(|ui| {
-            // tool strip (horizontal at the top of the panel)
-            for (t, icon, tip) in Tool::ALL {
-                let sel = self.tools.tool == t;
-                if ui.add(egui::Button::selectable(sel, RichText::new(icon).size(17.0))).on_hover_text(tip).clicked() {
-                    self.tools.tool = t;
-                    self.pick = Pick::None;
-                }
-            }
-        });
-        ui.separator();
+        ui.add_space(4.0);
+        let sep_y = ui.cursor().top();
+        let w = ui.available_width();
+        ui.painter().line_segment([pos2(ui.cursor().left(), sep_y), pos2(ui.cursor().left() + w, sep_y)], Stroke::new(1.0, Color32::from_rgb(44, 44, 44)));
+        ui.add_space(4.0);
+
         let Some(ci) = self.current else {
             ui.label("Open an image to start (File ▸ Open, or drop files here).");
             return;
@@ -1262,16 +1333,16 @@ impl App {
                 Zoom::Fit => "Fit".to_string(),
                 Zoom::Scale(z) => format!("{:.0}%", z * 100.0),
             };
-            egui::ComboBox::from_id_salt("zoom").selected_text(zl).width(70.0).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("zoom").selected_text(zl).width(68.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.zoom, Zoom::Fit, "Fit");
                 for z in [0.25f32, 0.5, 1.0, 2.0, 4.0, 8.0] {
                     ui.selectable_value(&mut self.zoom, Zoom::Scale(z), format!("{:.0}%", z * 100.0));
                 }
             });
-            if ui.button("−").clicked() {
+            if ui.add_sized([22.0, 20.0], egui::Button::new("−")).clicked() {
                 self.zoom_step(-1);
             }
-            if ui.button("+").clicked() {
+            if ui.add_sized([22.0, 20.0], egui::Button::new("+")).clicked() {
                 self.zoom_step(1);
             }
             ui.separator();
@@ -1302,14 +1373,34 @@ impl App {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(egui::Button::new(RichText::new("Done").strong())).on_hover_text("Save settings to the XMP sidecar").clicked() {
+                let done_btn = egui::Button::new(RichText::new("Done").strong().color(Color32::from_rgb(225, 225, 225)))
+                    .fill(Color32::from_rgb(48, 48, 48))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(66, 66, 66)))
+                    .corner_radius(3.0)
+                    .min_size(vec2(72.0, 24.0));
+                if ui.add(done_btn).on_hover_text("Save settings to the XMP sidecar").clicked() {
                     if let Some(d) = self.doc_mut() {
                         d.save_sidecar();
                     }
                     self.status = "Settings saved".into();
                 }
-                if ui.add(egui::Button::new(RichText::new("Save image…").strong()).fill(crate::widgets::ACCENT.gamma_multiply(0.7))).clicked() {
+                let save_btn = egui::Button::new(RichText::new("Save image…").strong().color(Color32::WHITE))
+                    .fill(crate::widgets::ACCENT)
+                    .corner_radius(3.0)
+                    .min_size(vec2(96.0, 24.0));
+                if ui.add(save_btn).clicked() {
                     self.export.open = true;
+                }
+                ui.add_space(12.0);
+                if let Some(d) = self.doc() {
+                    if let Some(e) = &d.engine {
+                        let (w, h) = e.source.oriented_size();
+                        let mp = (w as f64 * h as f64 / 1_000_000.0 * 10.0).round() / 10.0;
+                        let workflow_text = format!("Adobe RGB (1998); 16 bit; {} × {} ({:.1} MP); 300 ppi", w, h, mp);
+                        if ui.link(RichText::new(workflow_text).small().color(crate::widgets::ACCENT)).on_hover_text("Workflow Options (Preferences)").clicked() {
+                            self.show_prefs = true;
+                        }
+                    }
                 }
             });
         });
@@ -1336,15 +1427,44 @@ impl eframe::App for App {
         }
         self.shortcuts(&ctx);
 
-        egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
-        egui::Panel::bottom("bottom").show(ui, |ui| self.bottom_bar(ui));
+        egui::Panel::top("top")
+            .frame(egui::Frame::new().fill(Color32::from_rgb(28, 28, 28)).stroke(Stroke::new(1.0, Color32::from_rgb(44, 44, 44))))
+            .show(ui, |ui| self.top_bar(ui));
+
+        egui::Panel::bottom("bottom")
+            .frame(egui::Frame::new().fill(Color32::from_rgb(26, 26, 26)).stroke(Stroke::new(1.0, Color32::from_rgb(44, 44, 44))))
+            .show(ui, |ui| self.bottom_bar(ui));
+
         if self.show_filmstrip && self.docs.len() > 1 {
-            egui::Panel::bottom("filmstrip").resizable(true).default_size(118.0).show(ui, |ui| crate::filmstrip::filmstrip(self, ui));
+            egui::Panel::bottom("filmstrip")
+                .resizable(true)
+                .default_size(118.0)
+                .frame(egui::Frame::new().fill(Color32::from_rgb(30, 30, 30)).stroke(Stroke::new(1.0, Color32::from_rgb(44, 44, 44))))
+                .show(ui, |ui| crate::filmstrip::filmstrip(self, ui));
         }
-        egui::Panel::right("right").resizable(true).default_size(330.0).size_range(260.0..=560.0).show(ui, |ui| self.right_panel(ui));
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_gray(40))).show(ui, |ui| {
-            crate::viewer::viewer(self, ui);
-        });
+
+        // Toolbar strip docked at the far right
+        egui::Panel::right("toolbar_strip")
+            .resizable(false)
+            .default_size(46.0)
+            .size_range(46.0..=46.0)
+            .frame(egui::Frame::new().fill(Color32::from_rgb(25, 25, 25)).stroke(Stroke::new(1.0, Color32::from_rgb(44, 44, 44))))
+            .show(ui, |ui| self.toolbar_strip(ui));
+
+        // Adjustment panel docked to the left of the toolbar strip
+        egui::Panel::right("edit_panel")
+            .resizable(true)
+            .default_size(335.0)
+            .size_range(260.0..=560.0)
+            .frame(egui::Frame::new().fill(Color32::from_rgb(34, 34, 34)).stroke(Stroke::new(1.0, Color32::from_rgb(44, 44, 44))))
+            .show(ui, |ui| self.right_panel(ui));
+
+        // Central image canvas
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(Color32::from_rgb(20, 20, 20)))
+            .show(ui, |ui| {
+                crate::viewer::viewer(self, ui);
+            });
 
         crate::dialogs::show_dialogs(self, &ctx);
         if let Some(l) = crate::widgets::take_auto_slider(&ctx) {

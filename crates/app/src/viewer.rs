@@ -186,6 +186,7 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     for (rect, before) in &views {
         let tex = if *before { app.before_tex.as_ref().or(app.fit_tex.as_ref()) } else { app.fit_tex.as_ref() };
         if let Some(t) = tex {
+            painter.rect_filled(rect.expand(1.0), 0.0, Color32::from_black_alpha(140));
             painter.image(t.tex.id(), *rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
         if !*before && matches!(app.zoom, Zoom::Scale(_)) && matches!(app.ba, BeforeAfter::Off) {

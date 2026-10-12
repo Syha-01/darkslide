@@ -5,7 +5,7 @@ use darkslide_core::analysis::Histogram;
 use darkslide_core::params::*;
 use darkslide_core::pipeline::curves::{Lut, point_curve_lut};
 use darkslide_core::profiles::{self, BUILTIN_LOOKS, PROFILES};
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, Color32, RichText, Stroke};
 
 use crate::doc::Doc;
 use crate::widgets::{self, SliderSpec, section, slider};
@@ -79,8 +79,22 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     // ------------------------------------------------------------- Profile
     section(ui, "Profile", None, true, |ui| {
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut s.treatment, Treatment::Color, "Color");
-            ui.selectable_value(&mut s.treatment, Treatment::BlackAndWhite, "Black & White");
+            let c_sel = s.treatment == Treatment::Color;
+            let bw_sel = s.treatment == Treatment::BlackAndWhite;
+            let c_btn = egui::Button::new(RichText::new("Color").size(12.0).color(if c_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
+                .fill(if c_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
+                .stroke(if c_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
+                .corner_radius(3.0);
+            if ui.add(c_btn).clicked() {
+                s.treatment = Treatment::Color;
+            }
+            let bw_btn = egui::Button::new(RichText::new("Black & White").size(12.0).color(if bw_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
+                .fill(if bw_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
+                .stroke(if bw_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
+                .corner_radius(3.0);
+            if ui.add(bw_btn).clicked() {
+                s.treatment = Treatment::BlackAndWhite;
+            }
         });
         let shown = s.profile.strip_prefix("dcp:").map(|p| dcp_name(p)).unwrap_or_else(|| s.profile.clone());
         egui::ComboBox::from_id_salt("profile").width((ui.available_width() - 16.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
@@ -181,7 +195,7 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
                 }
             });
             let active = *pc.pick == Pick::WhiteBalance;
-            if ui.selectable_label(active, "💧").on_hover_text("White balance tool (I)").clicked() {
+            if widgets::eyedropper_button(ui, active, "White balance tool (I)") {
                 *pc.pick = if active { Pick::None } else { Pick::WhiteBalance };
             }
         });
@@ -201,10 +215,18 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             s.tint = ti;
         }
         ui.horizontal(|ui| {
-            if ui.button("Auto").on_hover_text("Auto tone (Ctrl+U)").clicked() {
+            let auto_btn = egui::Button::new(RichText::new("Auto").size(12.0).color(Color32::from_rgb(220, 220, 220)))
+                .fill(Color32::from_rgb(46, 46, 46))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(60, 60, 60)))
+                .corner_radius(3.0);
+            if ui.add(auto_btn).on_hover_text("Auto tone (Ctrl+U)").clicked() {
                 pc.actions.push(Action::AutoTone);
             }
-            if ui.button("Default").on_hover_text("Reset the Basic sliders").clicked() {
+            let def_btn = egui::Button::new(RichText::new("Default").size(12.0).color(Color32::from_rgb(220, 220, 220)))
+                .fill(Color32::from_rgb(46, 46, 46))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(60, 60, 60)))
+                .corner_radius(3.0);
+            if ui.add(def_btn).on_hover_text("Reset the Basic sliders").clicked() {
                 s.exposure = 0.0;
                 s.contrast = 0.0;
                 s.highlights = 0.0;
@@ -616,9 +638,10 @@ pub fn point_color_ui(ui: &mut egui::Ui, pcs: &mut Vec<PointColor>, sel: &mut us
 pub fn point_color_ui_ext(ui: &mut egui::Ui, pcs: &mut Vec<PointColor>, sel: &mut usize, pick: &mut Pick, visualize: Option<&mut bool>) {
     ui.horizontal(|ui| {
         let active = *pick == Pick::PointColor;
-        if ui.selectable_label(active, "💧 Pick color").on_hover_text("Click in the image to sample a color").clicked() {
+        if widgets::eyedropper_button(ui, active, "Click in the image to sample a color") {
             *pick = if active { Pick::None } else { Pick::PointColor };
         }
+        ui.label(RichText::new("Pick color").size(12.0));
         ui.label(RichText::new(format!("{}/8", pcs.len())).weak());
     });
     if pcs.is_empty() {

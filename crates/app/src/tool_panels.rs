@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::doc::Doc;
 use crate::edit_panel::{self, EditUi, Pick};
-use crate::widgets::{SliderSpec, slider};
+use crate::widgets::{self, SliderSpec, slider};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tool {
@@ -740,10 +740,11 @@ pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut 
             MaskShape::ColorRange { samples, refine } => {
                 ui.horizontal(|ui| {
                     let active = *pick == Pick::Sampler;
-                    if ui.selectable_label(active, "💧 Add color").clicked() {
+                    if widgets::eyedropper_button(ui, active, "Sample color in image") {
                         *pick = if active { Pick::None } else { Pick::Sampler };
                     }
-                    ui.label(format!("{} sample(s)", samples.len()));
+                    ui.label("Add color");
+                    ui.label(format!("({} samples)", samples.len()));
                     if ui.small_button("Clear").clicked() {
                         samples.clear();
                     }
