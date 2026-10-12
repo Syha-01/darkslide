@@ -435,6 +435,69 @@ impl App {
         });
     }
 
+    /// Shown in the canvas before any image is open: the whole canvas is a
+    /// drop zone, with buttons to browse in the middle.
+    pub fn start_view(&mut self, ui: &mut egui::Ui, view: Rect) {
+        let zone = view.shrink(24.0);
+        let resp = ui.interact(zone, ui.id().with("drop_zone"), egui::Sense::click());
+        let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
+        let p = ui.painter_at(view);
+        let (fill, line) = if hovering {
+            (crate::widgets::ACCENT.gamma_multiply(0.12), crate::widgets::ACCENT)
+        } else if resp.hovered() {
+            (Color32::from_white_alpha(5), Color32::from_gray(120))
+        } else {
+            (Color32::TRANSPARENT, Color32::from_gray(80))
+        };
+        p.rect_filled(zone, 10.0, fill);
+        let corners = [zone.left_top(), zone.right_top(), zone.right_bottom(), zone.left_bottom(), zone.left_top()];
+        for seg in corners.windows(2) {
+            p.extend(egui::Shape::dashed_line(&[seg[0], seg[1]], Stroke::new(1.5, line), 8.0, 6.0));
+        }
+        let c = zone.center();
+        // tray with a down arrow
+        let s = Stroke::new(2.5, line);
+        let (top, y) = (c.y - 120.0, c.y - 70.0);
+        p.line_segment([pos2(c.x, top), pos2(c.x, y)], s);
+        p.line_segment([pos2(c.x - 12.0, y - 12.0), pos2(c.x, y)], s);
+        p.line_segment([pos2(c.x + 12.0, y - 12.0), pos2(c.x, y)], s);
+        p.line_segment([pos2(c.x - 28.0, y - 8.0), pos2(c.x - 28.0, y + 10.0)], s);
+        p.line_segment([pos2(c.x - 28.0, y + 10.0), pos2(c.x + 28.0, y + 10.0)], s);
+        p.line_segment([pos2(c.x + 28.0, y + 10.0), pos2(c.x + 28.0, y - 8.0)], s);
+        let msg = if hovering { "Release to open" } else { "Drag & drop photos here" };
+        p.text(pos2(c.x, c.y - 32.0), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(20.0), Color32::from_gray(220));
+        p.text(pos2(c.x, c.y - 8.0), egui::Align2::CENTER_CENTER, "or", egui::FontId::proportional(13.0), Color32::from_gray(140));
+        let bw = 200.0;
+        let area = Rect::from_min_size(pos2(c.x - bw / 2.0, c.y + 8.0), vec2(bw, 110.0));
+        let mut open: Option<Vec<PathBuf>> = None;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+            if ui
+                .add_sized([bw, 34.0], egui::Button::new(RichText::new("Add photo(s)…").size(15.0).color(Color32::WHITE)).fill(crate::widgets::ACCENT))
+                .on_hover_text("Ctrl+O")
+                .clicked()
+            {
+                open = crate::dialogs::pick_files();
+            }
+            ui.add_space(4.0);
+            if ui.add_sized([bw, 28.0], egui::Button::new("Open folder…")).on_hover_text("Ctrl+Shift+O").clicked() {
+                open = rfd::FileDialog::new().pick_folder().map(|d| vec![d]);
+            }
+        });
+        p.text(
+            pos2(c.x, area.bottom() + 16.0),
+            egui::Align2::CENTER_CENTER,
+            "Raw files from most cameras, DNG, JPEG, TIFF, PNG, HEIC and more",
+            egui::FontId::proportional(12.0),
+            Color32::from_gray(130),
+        );
+        if open.is_none() && resp.clicked() {
+            open = crate::dialogs::pick_files();
+        }
+        if let Some(files) = open {
+            self.open_paths(files);
+        }
+    }
+
     /// Filmstrip thumbnail from the edited render; cached once edits settle.
     fn refresh_thumb(&mut self, ctx: &egui::Context, rgba: &[u8], w: usize, h: usize) {
         let Some(src) = image::RgbaImage::from_raw(w as u32, h as u32, rgba.to_vec()) else { return };
@@ -1385,7 +1448,7 @@ impl App {
         ui.add_space(2.0);
 
         let Some(ci) = self.current else {
-            ui.label("Open an image to start (File ▸ Open, or drop files here).");
+            ui.label(RichText::new("Add photos to start editing.").color(Color32::from_gray(150)));
             return;
         };
         let hist = self.hist.clone();

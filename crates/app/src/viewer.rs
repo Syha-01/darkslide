@@ -117,18 +117,13 @@ impl ViewMap {
 pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     let view = ui.max_rect();
     app.view_rect = view;
+    if app.doc().is_none() {
+        app.start_view(ui, view);
+        return;
+    }
     let (resp_rect, resp) = (view, ui.interact(view, ui.id().with("viewer"), Sense::click_and_drag()));
     let painter = ui.painter_at(resp_rect);
-    let Some(doc) = app.doc() else {
-        painter.text(
-            view.center(),
-            egui::Align2::CENTER_CENTER,
-            "Open images with File ▸ Open, Ctrl+O, or drag & drop",
-            egui::FontId::proportional(18.0),
-            Color32::GRAY,
-        );
-        return;
-    };
+    let doc = app.doc().unwrap();
     if let Some(err) = &doc.load_error {
         painter.text(
             view.center(),
