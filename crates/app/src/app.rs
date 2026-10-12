@@ -1145,6 +1145,7 @@ impl App {
                 t.selected_comp = None;
             }
             Tool::RedEye if t.selected_red_eye.is_some() => t.selected_red_eye = None,
+            Tool::Presets if t.preset_ui.escape() => {}
             Tool::Edit => {}
             _ => self.set_tool(Tool::Edit),
         }
@@ -1611,7 +1612,9 @@ impl App {
         };
         let hist = self.hist.clone();
         let mut actions = vec![];
-        // a scrollbar that's always there says when more is below
+        // a scrollbar that's always there says when more is below; solid, so
+        // it takes its own gutter instead of covering the panel's right edge
+        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
         egui::ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
             let doc = &mut self.docs[ci];
             if let Some(err) = &doc.load_error {

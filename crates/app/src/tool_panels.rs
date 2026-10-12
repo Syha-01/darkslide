@@ -162,7 +162,7 @@ impl Default for ToolUi {
             presets_loaded: false,
             preset_amount: 100.0,
             new_preset_name: String::new(),
-            new_preset_group: "User Presets".into(),
+            new_preset_group: String::new(),
             snapshot_name: String::new(),
             mask_grading_view: 0,
             mask_point_sel: 0,
