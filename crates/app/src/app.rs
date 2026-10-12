@@ -127,6 +127,8 @@ pub struct App {
     pub grid: bool,
     pub profiles: crate::dialogs::ProfileBrowser,
     pub distract_jobs: Arc<Mutex<Vec<(u64, Option<darkslide_core::params::RetouchSpot>)>>>,
+    /// Finished lens database download: lens count or error.
+    pub lens_dl: Arc<Mutex<Option<Result<usize, String>>>>,
     /// "Reset all settings?" confirmation is showing.
     pub confirm_reset: bool,
 }
@@ -188,6 +190,7 @@ impl App {
             profiles: Default::default(),
             distract_jobs: Arc::new(Mutex::new(vec![])),
             confirm_reset: false,
+            lens_dl: Arc::new(Mutex::new(None)),
         };
         app.edit.show_scope = app.prefs.show_vectorscope;
         app.open_paths(paths);
@@ -299,6 +302,22 @@ impl App {
         while let Ok(out) = self.worker.rx.try_recv() {
             self.accept(ctx, out);
         }
+        let dl = self.lens_dl.lock().unwrap().take();
+        if let Some(r) = dl {
+            match r {
+                Ok(n) => {
+                    for d in &self.docs {
+                        if let Some(e) = &d.engine {
+                            e.forget_lens_db();
+                        }
+                    }
+                    self.last_fit = None;
+                    self.last_detail = None;
+                    self.status = format!("Lens database installed ({n} lenses)");
+                }
+                Err(e) => self.status = format!("Lens database download failed: {e}"),
+            }
+        }
         if let Some((at, ..)) = &self.thumb_save {
             let wait = std::time::Duration::from_secs(1);
             if at.elapsed() >= wait {
@@ -400,6 +419,20 @@ impl App {
             }
             self.fit_rgba = Some((out.rgba, out.w, out.h));
         }
+    }
+
+    pub fn download_lens_db(&mut self) {
+        let busy = self.busy.clone();
+        if busy.lock().unwrap().is_some() {
+            return;
+        }
+        *busy.lock().unwrap() = Some("Downloading lens database…".into());
+        let out = self.lens_dl.clone();
+        std::thread::spawn(move || {
+            let r = darkslide_core::lens::download_lensfun_db().map_err(|e| e.to_string());
+            *out.lock().unwrap() = Some(r);
+            *busy.lock().unwrap() = None;
+        });
     }
 
     /// Filmstrip thumbnail from the edited render; cached once edits settle.
@@ -647,6 +680,7 @@ impl App {
                     self.status = format!("Found {n} dust spot(s)");
                 }
                 Action::ResetAll => self.confirm_reset = true,
+                Action::DownloadLensDb => self.download_lens_db(),
                 Action::BrowseProfiles => {
                     let (st, id) = (d.settings.clone(), d.id);
                     self.profiles.open(&e, &st, id);

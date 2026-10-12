@@ -165,6 +165,41 @@ pub struct LensfunLens {
     pub vignetting: Vec<(f64, f64, [f64; 3])>,
 }
 
+const LENSFUN_DB_URL: &str = "https://lensfun.github.io/db/version_1.tar.bz2";
+
+/// Fetch the current lensfun database into ~/.local/share/darkslide/lensfun
+/// (uses curl and tar). Returns the number of lenses it holds.
+pub fn download_lensfun_db() -> anyhow::Result<usize> {
+    use anyhow::{Context, bail};
+    let dest = crate::paths::data_dir().join("lensfun");
+    let tmp = crate::paths::data_dir().join("lensfun.download");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("db"))?;
+    let tarball = tmp.join("db.tar.bz2");
+    let st =
+        std::process::Command::new("curl").args(["-fsSL", "--max-time", "120", "-o"]).arg(&tarball).arg(LENSFUN_DB_URL).status().context("running curl")?;
+    if !st.success() {
+        bail!("download failed (curl exit {})", st.code().unwrap_or(-1));
+    }
+    let st = std::process::Command::new("tar").arg("xjf").arg(&tarball).arg("-C").arg(tmp.join("db")).status().context("running tar")?;
+    if !st.success() {
+        bail!("couldn't unpack the database");
+    }
+    let n: usize = std::fs::read_dir(tmp.join("db"))?
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|e| e.to_str()) == Some("xml"))
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .map(|t| parse_lensfun_xml(&t).len())
+        .sum();
+    if n == 0 {
+        bail!("the download held no lenses");
+    }
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::rename(tmp.join("db"), &dest)?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(n)
+}
+
 pub fn load_lensfun_db() -> Vec<LensfunLens> {
     let mut lenses = vec![];
     for d in lensfun_dirs() {

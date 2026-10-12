@@ -536,6 +536,7 @@ Session 1, later still:
    renders with `--set` (see the contact-sheet approach in session notes).
 
 Known gaps / next:
-- Auto CA estimate is crude; lensfun DB not bundled (needs download).
+- Auto CA estimate is crude. lensfun DB: Optics panel / Preferences download it
+  into ~/.local/share/darkslide/lensfun (curl + tar).
 - HDR AVIF/JXL (PQ/HLG), lossy JXL, merge HDR/pano, denoise AI,
   super resolution, lens blur, AI masks: not yet.

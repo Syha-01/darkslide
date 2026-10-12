@@ -493,6 +493,11 @@ impl Engine {
         db
     }
 
+    /// Re-read the lens database on next use (after it was installed).
+    pub fn forget_lens_db(&self) {
+        self.caches.lock().unwrap().lens_db = None;
+    }
+
     pub fn lens_profile(&self, s: &DevelopSettings) -> Option<LensProfile> {
         if !s.lens.profile_enable {
             return None;

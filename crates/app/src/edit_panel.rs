@@ -66,6 +66,7 @@ pub enum Action {
     UprightAnalyze(Upright),
     ImportLook,
     AutoGrayMix,
+    DownloadLensDb,
     /// Ask before resetting every setting to the defaults.
     ResetAll,
 }
@@ -459,11 +460,14 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             ui.label(
                 RichText::new(match (&lens, db.is_empty()) {
                     (Some(p), _) => format!("{} {}", p.maker, p.model),
-                    (None, true) => "No lens database found (install lensfun)".into(),
+                    (None, true) => "No lens database installed".into(),
                     (None, false) => format!("No profile for {}", engine.source.meta.lens.clone().unwrap_or_default()),
                 })
                 .small(),
             );
+            if db.is_empty() && ui.button("Download lens database").on_hover_text("Fetch lensfun's lens profiles (about 1 MB)").clicked() {
+                pc.actions.push(Action::DownloadLensDb);
+            }
             let mut name = s.lens.profile.clone().unwrap_or_default();
             ui.horizontal(|ui| {
                 ui.label("Lens");

@@ -561,7 +561,12 @@ fn prefs_window(app: &mut App, ctx: &egui::Context) {
         ui.label(RichText::new("Locations").strong());
         ui.label(format!("Presets: {}", darkslide_core::paths::presets_dir().display()));
         ui.label(format!("Profiles (.cube): {}", darkslide_core::profiles::user_looks_dir().display()));
-        ui.label(format!("Lens database: {} (lensfun XML)", darkslide_core::paths::data_dir().join("lensfun").display()));
+        ui.horizontal(|ui| {
+            ui.label(format!("Lens database: {} (lensfun XML)", darkslide_core::paths::data_dir().join("lensfun").display()));
+            if ui.button("Update").on_hover_text("Download the latest lensfun lens profiles").clicked() {
+                app.download_lens_db();
+            }
+        });
         ui.label(format!("Camera defaults: {}", darkslide_core::paths::config_dir().join("defaults").display()));
         if ui.button("Save").clicked() {
             app.prefs.show_vectorscope = app.edit.show_scope;
