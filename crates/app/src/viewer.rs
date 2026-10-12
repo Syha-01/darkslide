@@ -58,6 +58,62 @@ pub struct ViewMap {
     pub rect: Rect,
     pub crop_tool: bool,
     pub geo: Geometry,
+    /// Crop tool: the photo turns under an upright crop box, like ACR.
+    pub rot: Option<RotView>,
+}
+
+/// Crop-tool screen frame: rotated by the straighten angle so the crop is
+/// axis-aligned on screen. Screen = centre + scale * R(-angle) * (T px - T centre).
+#[derive(Clone, Copy)]
+pub struct RotView {
+    pub center: Pos2,
+    /// Screen points per T-frame pixel.
+    pub scale: f32,
+    cos: f64,
+    sin: f64,
+    ow: f64,
+    oh: f64,
+}
+
+impl RotView {
+    /// Fit the rotated photo's bounding box `rect` (laid out from `rotated_size`).
+    pub fn new(rect: Rect, geo: &Geometry) -> Self {
+        let a = (geo.crop.angle as f64).to_radians();
+        let (bw, _) = rotated_size(geo);
+        Self { center: rect.center(), scale: rect.width() / bw as f32, cos: a.cos(), sin: a.sin(), ow: geo.ow, oh: geo.oh }
+    }
+    pub fn from_t(&self, t: [f64; 2]) -> Pos2 {
+        let (x, y) = ((t[0] - 0.5) * self.ow, (t[1] - 0.5) * self.oh);
+        let (qx, qy) = (x * self.cos + y * self.sin, -x * self.sin + y * self.cos);
+        self.center + vec2(qx as f32, qy as f32) * self.scale
+    }
+    pub fn to_t(&self, p: Pos2) -> [f64; 2] {
+        let q = (p - self.center) / self.scale;
+        let (qx, qy) = (q.x as f64, q.y as f64);
+        let (x, y) = (qx * self.cos - qy * self.sin, qx * self.sin + qy * self.cos);
+        [x / self.ow + 0.5, y / self.oh + 0.5]
+    }
+    /// Screen corners of the whole photo (tl, tr, br, bl).
+    pub fn photo_corners(&self) -> [Pos2; 4] {
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]].map(|t| self.from_t(t))
+    }
+}
+
+/// Size of the photo's bounding box once turned by the straighten angle.
+pub fn rotated_size(geo: &Geometry) -> (f64, f64) {
+    let a = (geo.crop.angle as f64).to_radians();
+    let (c, s) = (a.cos().abs(), a.sin().abs());
+    (geo.ow * c + geo.oh * s, geo.ow * s + geo.oh * c)
+}
+
+/// Draw a texture onto a (possibly rotated) quad.
+fn paint_quad(painter: &egui::Painter, tex: egui::TextureId, corners: [Pos2; 4]) {
+    let mut mesh = egui::Mesh::with_texture(tex);
+    for (p, uv) in corners.iter().zip([pos2(0.0, 0.0), pos2(1.0, 0.0), pos2(1.0, 1.0), pos2(0.0, 1.0)]) {
+        mesh.vertices.push(egui::epaint::Vertex { pos: *p, uv, color: Color32::WHITE });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 impl ViewMap {
@@ -68,6 +124,9 @@ impl ViewMap {
         pos2(self.rect.min.x + c[0] as f32 * self.rect.width(), self.rect.min.y + c[1] as f32 * self.rect.height())
     }
     pub fn to_t(&self, p: Pos2) -> [f64; 2] {
+        if let Some(r) = &self.rot {
+            return r.to_t(p);
+        }
         let c = self.to_crop(p);
         if self.crop_tool {
             c
@@ -77,6 +136,9 @@ impl ViewMap {
         }
     }
     pub fn from_t(&self, t: [f64; 2]) -> Pos2 {
+        if let Some(r) = &self.rot {
+            return r.from_t(t);
+        }
         if self.crop_tool {
             self.from_crop(t)
         } else {
@@ -145,7 +207,9 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
         let g = engine.geometry(&doc.settings, fw, fh, crop_tool);
         if crop_tool { g.without_crop() } else { g }
     };
-    let (cw, ch) = geo_view.crop_size();
+    // in the crop tool the layout box is the turned photo's bounds
+    let geo_full = engine.geometry(&doc.settings, fw, fh, false);
+    let (cw, ch) = if crop_tool { rotated_size(&geo_full) } else { geo_view.crop_size() };
     let ppp = ui.ctx().pixels_per_point();
 
     // layout
@@ -181,10 +245,16 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     for (rect, before) in &views {
         let tex = if *before { app.before_tex.as_ref().or(app.fit_tex.as_ref()) } else { app.fit_tex.as_ref() };
         if let Some(t) = tex {
-            painter.rect_filled(rect.expand(1.0), 0.0, Color32::from_black_alpha(140));
-            painter.image(t.tex.id(), *rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            if crop_tool {
+                paint_quad(&painter, t.tex.id(), RotView::new(*rect, &geo_full).photo_corners());
+            } else {
+                painter.rect_filled(rect.expand(1.0), 0.0, Color32::from_black_alpha(140));
+                painter.image(t.tex.id(), *rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            }
         }
-        if !*before && matches!(app.zoom, Zoom::Scale(_)) && matches!(app.ba, BeforeAfter::Off) {
+        // zoomed tiles are axis-aligned; while straightening the fit preview stands in
+        let turned = crop_tool && geo_full.crop.angle.abs() > 0.01;
+        if !*before && !turned && matches!(app.zoom, Zoom::Scale(_)) && matches!(app.ba, BeforeAfter::Off) {
             if let Some(d) = &app.detail_tex {
                 let r = &d.region;
                 let dr = Rect::from_min_max(
@@ -226,14 +296,7 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     }
 
     let Some(&(img_rect, _)) = views.last() else { return };
-    let map = ViewMap {
-        rect: img_rect,
-        crop_tool,
-        geo: {
-            let g = engine.geometry(&doc.settings, fw, fh, false);
-            g
-        },
-    };
+    let map = ViewMap { rect: img_rect, crop_tool, rot: crop_tool.then(|| RotView::new(img_rect, &geo_full)), geo: geo_full };
 
     // mask overlay
     if app.tools.tool == Tool::Masking && app.tools.show_mask_overlay {
@@ -251,8 +314,9 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     // hover readout
     app.drag.hover_rgb = None;
     if let Some(hp) = resp.hover_pos() {
-        if img_rect.contains(hp) {
-            let c = map.to_crop(hp);
+        // the fit preview is the uncropped photo in the crop tool
+        let c = if map.rot.is_some() { map.to_t(hp) } else { map.to_crop(hp) };
+        if (0.0..=1.0).contains(&c[0]) && (0.0..=1.0).contains(&c[1]) {
             app.drag.hover_rgb = app.sample_fit([c[0] as f32, c[1] as f32]);
         }
     }
@@ -881,7 +945,8 @@ fn continue_tool_drag(app: &mut App, map: &ViewMap, p: Pos2, shift: bool) {
             let corners = crop_corners_screen(map);
             let c = corners[0].lerp(corners[2], 0.5);
             let ang = (p.y - c.y).atan2(p.x - c.x).to_degrees();
-            s.crop.angle = (start_crop.angle + (ang - angle_ref)).clamp(-45.0, 45.0);
+            // the photo turns with the pointer (the box stays upright)
+            s.crop.angle = (start_crop.angle - (ang - angle_ref)).clamp(-45.0, 45.0);
             tool_panels::fit_crop_inside(s, &engine);
         }
         DragKind::Brush => {
@@ -1238,16 +1303,25 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
     match app.tools.tool {
         Tool::Crop => {
             let corners = crop_corners_screen(map);
-            // darken outside
-            let outer = map.rect;
-            let mut mesh_pts = corners.to_vec();
-            mesh_pts.push(corners[0]);
+            // dim everything outside the (upright) crop box
+            let cr = Rect::from_points(&corners);
+            let o = painter.clip_rect();
+            let dim = Color32::from_black_alpha(150);
+            for r in [
+                Rect::from_min_max(o.min, pos2(o.max.x, cr.min.y)),
+                Rect::from_min_max(pos2(o.min.x, cr.max.y), o.max),
+                Rect::from_min_max(pos2(o.min.x, cr.min.y), pos2(cr.min.x, cr.max.y)),
+                Rect::from_min_max(pos2(cr.max.x, cr.min.y), pos2(o.max.x, cr.max.y)),
+            ] {
+                if r.is_positive() {
+                    painter.rect_filled(r, 0.0, dim);
+                }
+            }
             for i in 0..4 {
                 let (a, b) = (corners[i], corners[(i + 1) % 4]);
                 painter.line_segment([a, b], shadow);
                 painter.line_segment([a, b], Stroke::new(1.5, Color32::WHITE));
             }
-            let _ = (outer, mesh_pts);
             // overlay guides
             let lerp2 = |u: f32, v: f32| {
                 let top = corners[0].lerp(corners[1], u);

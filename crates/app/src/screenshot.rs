@@ -112,6 +112,46 @@ pub fn smoke(args: Vec<String>) -> anyhow::Result<()> {
         }
         println!("crop cursors {name}: {seen:?}");
     }
+    // turned crop: edge drag resizes without touching the angle; dragging
+    // clockwise outside turns the photo clockwise (angle goes down)
+    if let Some(d) = harness.state_mut().doc_mut() {
+        d.settings.crop = darkslide_core::params::Crop { angle: 8.0, left: 0.1, top: 0.12, right: 0.9, bottom: 0.88, ..Default::default() };
+    }
+    settle(&mut harness, 10);
+    {
+        let before = harness.state().doc().unwrap().settings.crop;
+        // left edge midpoint: walk left from the centre until the cursor says resize
+        let mut edge = None;
+        for k in 0..80 {
+            let p = c - egui::vec2(k as f32 * 6.0, 0.0);
+            harness.hover_at(p);
+            harness.step();
+            if harness.output().platform_output.cursor_icon == egui::CursorIcon::ResizeHorizontal {
+                edge = Some(p);
+                break;
+            }
+        }
+        if let Some(e) = edge {
+            drag(&mut harness, e, e + egui::vec2(40.0, 0.0));
+        }
+        let mid = harness.state().doc().unwrap().settings.crop;
+        drag(&mut harness, c + egui::vec2(0.0, -view.height() * 0.47), c + egui::vec2(view.width() * 0.2, -view.height() * 0.45));
+        let after = harness.state().doc().unwrap().settings.crop;
+        println!(
+            "turned crop: edge found={} left {:.3}->{:.3} angle {:.2}->{:.2}; rotate drag angle {:.2}->{:.2}",
+            edge.is_some(),
+            before.left,
+            mid.left,
+            before.angle,
+            mid.angle,
+            mid.angle,
+            after.angle
+        );
+    }
+    if let Some(d) = harness.state_mut().doc_mut() {
+        d.settings.crop = Default::default();
+    }
+    settle(&mut harness, 5);
     let img_tl = c - egui::vec2(view.width() * 0.45, view.height() * 0.3);
     drag(&mut harness, img_tl, img_tl + egui::vec2(80.0, 60.0));
     drag(&mut harness, c, c + egui::vec2(40.0, 20.0));

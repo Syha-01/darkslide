@@ -151,7 +151,16 @@ const ASPECTS: [(&str, Option<[f32; 2]>); 9] = [
 pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
     let Some(engine) = doc.engine.clone() else { return };
     let s = &mut doc.settings;
-    ui.heading("Crop & Rotate");
+    ui.horizontal(|ui| {
+        ui.heading("Crop & Rotate");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let untouched = s.crop == Crop::default();
+            let reset = egui::Button::new(format!("{}  Reset crop", ic::ARROW_COUNTER_CLOCKWISE));
+            if ui.add_enabled(!untouched, reset).on_hover_text("Back to the uncropped photo: no crop, angle, rotation or flip").clicked() {
+                s.crop = Crop::default();
+            }
+        });
+    });
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Aspect");
@@ -233,10 +242,6 @@ pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
     });
     ui.checkbox(&mut s.crop.expand, "Allow crop outside image (expand)").on_hover_text("Areas outside are filled with content-aware fill on export");
     ui.add_space(8.0);
-    if ui.button("Reset crop").clicked() {
-        reset_crop(s);
-        s.crop.angle = 0.0;
-    }
     ui.label(RichText::new("Drag corners/edges to resize, inside to move, outside to rotate. Enter or C to finish.").weak().small());
 }
 

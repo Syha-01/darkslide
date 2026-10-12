@@ -43,21 +43,6 @@ pub fn draw_tool_icon(painter: &egui::Painter, tool: Tool, center: Pos2, size: f
 }
 
 #[allow(dead_code)]
-pub fn draw_eyeball(painter: &egui::Painter, center: Pos2, size: f32, open: bool, color: Color32) {
-    let w = size * 0.45;
-    let h = size * 0.26;
-    let pts_top = vec![center + vec2(-w, 0.0), center + vec2(-w * 0.5, -h), center + vec2(w * 0.5, -h), center + vec2(w, 0.0)];
-    let pts_bot = vec![center + vec2(w, 0.0), center + vec2(w * 0.5, h), center + vec2(-w * 0.5, h), center + vec2(-w, 0.0)];
-    let stroke = Stroke::new(1.2, color);
-    painter.add(egui::Shape::line(pts_top, stroke));
-    painter.add(egui::Shape::line(pts_bot, stroke));
-    if open {
-        painter.circle_filled(center, h * 0.55, color);
-    } else {
-        painter.line_segment([center + vec2(-w * 0.85, -h * 1.1), center + vec2(w * 0.85, h * 1.1)], Stroke::new(1.3, color));
-    }
-}
-
 pub fn draw_icon_eyedropper(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
     let s = size * 0.38;
     let a = (-45.0f32).to_radians();
@@ -394,7 +379,8 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
             painter.rect_filled(eye_rect, 2.0, crate::theme::pal().border);
         }
         let eye_col = if *en { if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) } } else { crate::theme::pal().text_muted };
-        draw_eyeball(&painter, eye_rect.center(), 14.0, *en, eye_col);
+        let eye = if *en { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_SLASH };
+        painter.text(eye_rect.center(), egui::Align2::CENTER_CENTER, eye, egui::FontId::proportional(16.0), eye_col);
         if eye_resp.on_hover_text("Toggle section on/off").clicked() {
             *en = !*en;
             toggled = true;
