@@ -22,23 +22,23 @@ pub fn filmstrip(app: &mut App, ui: &mut egui::Ui) {
         if n_sel > 1 {
             head.push_str(&format!(" · {n_sel} selected"));
         }
-        ui.label(RichText::new(head).small().weak());
+        ui.label(RichText::new(head).size(12.0).weak());
         ui.separator();
-        ui.label(RichText::new("Filter:").small());
+        ui.label(RichText::new(format!("{}  Filter", ic::FUNNEL_SIMPLE)).size(12.0));
         egui::ComboBox::from_id_salt("frating")
-            .width(60.0)
+            .width(70.0)
             .selected_text(if app.filter_rating == 0 { "All".into() } else { format!("≥ {}★", app.filter_rating) })
             .show_ui(ui, |ui| {
                 for r in 0..=5 {
                     ui.selectable_value(&mut app.filter_rating, r, if r == 0 { "All".into() } else { format!("≥ {r}★") });
                 }
             });
-        egui::ComboBox::from_id_salt("flabel").width(70.0).selected_text(app.filter_label.name().unwrap_or("Any label")).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("flabel").width(90.0).selected_text(app.filter_label.name().unwrap_or("Any label")).show_ui(ui, |ui| {
             for l in ColorLabel::ALL {
                 ui.selectable_value(&mut app.filter_label, l, l.name().unwrap_or("Any label"));
             }
         });
-        if ui.small_button("Select all").clicked() {
+        if ui.button("Select all").clicked() {
             app.select_all_visible();
         }
     });

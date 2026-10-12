@@ -782,6 +782,12 @@ pub fn histogram(ui: &mut egui::Ui, h: Option<&Histogram>, show_s: bool, show_h:
         };
         tri(true, show_s, h.clip_shadows);
         tri(false, show_h, h.clip_highlights);
+        for (left, tip) in [(true, "Shadow clipping warning (U)"), (false, "Highlight clipping warning (O)")] {
+            let r = if left { Rect::from_min_size(pos2(rect.left() + 3.0, rect.top() + 3.0), vec2(15.0, 15.0)) } else { Rect::from_min_size(pos2(rect.right() - 18.0, rect.top() + 3.0), vec2(15.0, 15.0)) };
+            ui.interact(r, ui.id().with(("cliptip", left)), Sense::hover()).on_hover_text(tip);
+        }
+    } else {
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, "No photo", egui::FontId::proportional(12.0), crate::theme::pal().text_muted);
     }
     let resp = ui.interact(rect, ui.id().with("histclick"), Sense::click());
     if resp.clicked() {

@@ -87,6 +87,8 @@ pub struct BrushParams {
 pub struct ToolUi {
     pub tool: Tool,
     pub crop_overlay: CropOverlay,
+    /// Overlay guides always, or only while dragging (Lightroom's Auto).
+    pub crop_guides_always: bool,
     pub straighten: bool,
     /// Crop before the angle slider started moving.
     pub angle_base: Option<Crop>,
@@ -138,6 +140,7 @@ impl Default for ToolUi {
         Self {
             tool: Tool::Edit,
             crop_overlay: CropOverlay::Thirds,
+            crop_guides_always: true,
             straighten: false,
             angle_base: None,
             crop_note: None,
@@ -319,6 +322,10 @@ pub fn crop_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
             })
             .response
             .on_hover_text("O cycles the overlays");
+        egui::ComboBox::from_id_salt("overlay_when").width(110.0).selected_text(if t.crop_guides_always { "Always" } else { "While dragging" }).show_ui(ui, |ui| {
+            ui.selectable_value(&mut t.crop_guides_always, true, "Always");
+            ui.selectable_value(&mut t.crop_guides_always, false, "While dragging");
+        });
     });
     ui.checkbox(&mut s.crop.expand, "Allow crop outside image (expand)").on_hover_text("Areas outside are filled with content-aware fill on export");
     ui.add_space(8.0);
@@ -468,9 +475,11 @@ pub fn remove_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, actions: &
             resource(sp);
         }
     }
-    let mut size = t.spot_size * 1000.0;
-    if slider(ui, &mut size, SliderSpec::new("Size", 1.0, 200.0, 12.0)) {
-        t.spot_size = size / 1000.0;
+    // sized in photo pixels (radius), stored relative to the long edge
+    let long = engine.as_ref().map(|e| e.full_size()).map(|(w, h)| w.max(h) as f32).unwrap_or(1000.0);
+    let mut size = (t.spot_size * long).round();
+    if slider(ui, &mut size, SliderSpec::new("Size", 1.0, (0.2 * long).round(), (0.012 * long).round()).suffix(" px")) {
+        t.spot_size = size / long;
         if let Some(sp) = sel.map(|i| &mut s.retouch[i]) {
             sp.radius = t.spot_size;
             // a grown spot can't take from where it now overlaps

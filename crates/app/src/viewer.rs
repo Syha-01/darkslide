@@ -297,18 +297,26 @@ pub fn viewer(app: &mut App, ui: &mut egui::Ui) {
     // split views: before on one side of a divider
     if matches!(app.ba, BeforeAfter::SplitLeftRight | BeforeAfter::SplitTopBottom) {
         if let (Some(b), Some((rect, _))) = (app.before_tex.as_ref(), views.first()) {
-            let (r, uv) = if app.ba == BeforeAfter::SplitLeftRight {
-                (Rect::from_min_max(rect.min, pos2(rect.center().x, rect.max.y)), Rect::from_min_max(pos2(0.0, 0.0), pos2(0.5, 1.0)))
+            let f = app.split.clamp(0.0, 1.0);
+            let lr = app.ba == BeforeAfter::SplitLeftRight;
+            let (r, uv) = if lr {
+                (Rect::from_min_max(rect.min, pos2(rect.lerp_inside(vec2(f, 0.0)).x, rect.max.y)), Rect::from_min_max(pos2(0.0, 0.0), pos2(f, 1.0)))
             } else {
-                (Rect::from_min_max(rect.min, pos2(rect.max.x, rect.center().y)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 0.5)))
+                (Rect::from_min_max(rect.min, pos2(rect.max.x, rect.lerp_inside(vec2(0.0, f)).y)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, f)))
             };
             painter.image(b.tex.id(), r, uv, Color32::WHITE);
-            let line = if app.ba == BeforeAfter::SplitLeftRight {
-                [pos2(rect.center().x, rect.min.y), pos2(rect.center().x, rect.max.y)]
-            } else {
-                [pos2(rect.min.x, rect.center().y), pos2(rect.max.x, rect.center().y)]
-            };
+            let at = rect.lerp_inside(vec2(f, f));
+            let line = if lr { [pos2(at.x, rect.min.y), pos2(at.x, rect.max.y)] } else { [pos2(rect.min.x, at.y), pos2(rect.max.x, at.y)] };
             painter.line_segment(line, Stroke::new(1.5, Color32::WHITE));
+            // the divider drags, to compare any part of the photo
+            let grip = Rect::from_two_pos(line[0], line[1]).expand(5.0);
+            let gr = ui.interact(grip, ui.id().with("split"), Sense::drag()).on_hover_cursor(if lr { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+            if let Some(q) = gr.interact_pointer_pos().filter(|_| gr.dragged()) {
+                app.split = if lr { (q.x - rect.left()) / rect.width() } else { (q.y - rect.top()) / rect.height() }.clamp(0.02, 0.98);
+            }
+            let knob = if lr { pos2(at.x, rect.center().y) } else { pos2(rect.center().x, at.y) };
+            painter.circle_filled(knob, 7.0, Color32::WHITE);
+            painter.text(knob, egui::Align2::CENTER_CENTER, if lr { egui_phosphor::regular::ARROWS_LEFT_RIGHT } else { egui_phosphor::regular::ARROWS_DOWN_UP }, egui::FontId::proportional(10.0), Color32::BLACK);
         }
     }
 
@@ -1488,8 +1496,13 @@ fn click(app: &mut App, map: &ViewMap, p: Pos2) {
 pub fn tat_begin(app: &mut App, map: &ViewMap, p: Pos2) {
     let c = map.to_crop(p);
     if let Some(rgb) = app.sample_fit([c[0] as f32, c[1] as f32]) {
-        let y = 0.2126 * rgb[0] as f32 + 0.7152 * rgb[1] as f32 + 0.0722 * rgb[2] as f32;
-        app.drag.tat_value = y;
+        // a channel curve moves the point at that channel's value, not the luminance
+        app.drag.tat_value = match app.edit.curve_mode {
+            CurveMode::Red => rgb[0] as f32,
+            CurveMode::Green => rgb[1] as f32,
+            CurveMode::Blue => rgb[2] as f32,
+            _ => 0.2126 * rgb[0] as f32 + 0.7152 * rgb[1] as f32 + 0.0722 * rgb[2] as f32,
+        };
         let lin = rgb.map(|v| darkslide_core::color::srgb_decode(v as f32 / 255.0));
         let pp = darkslide_core::color::mul_mv(&darkslide_core::color::to_prophoto(darkslide_core::color::ColorSpace::SRgb), lin);
         let lch = darkslide_core::color::lab_to_lch(darkslide_core::color::Oklab::new().from_prophoto(pp));
@@ -1537,7 +1550,8 @@ fn draw_overlays(app: &mut App, painter: &egui::Painter, map: &ViewMap, hover: O
                 top.lerp(bot, v)
             };
             let thin = Stroke::new(0.8, Color32::from_white_alpha(120));
-            match app.tools.crop_overlay {
+            let show_guides = app.tools.crop_guides_always || app.drag.active();
+            match if show_guides { app.tools.crop_overlay } else { CropOverlay::None } {
                 CropOverlay::Thirds => {
                     for f in [1.0 / 3.0, 2.0 / 3.0] {
                         painter.line_segment([lerp2(f, 0.0), lerp2(f, 1.0)], thin);

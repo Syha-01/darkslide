@@ -142,6 +142,8 @@ pub struct App {
     /// Subset chosen when the clipboard was filled; plain paste uses it.
     pub clipboard_subset: Option<crate::dialogs::Subset>,
     last_overlay: Color32,
+    /// Where the split before/after divider sits (0..1).
+    pub split: f32,
     /// Status text and when it was first shown, so it can fade out.
     status_seen: (String, std::time::Instant),
 }
@@ -210,6 +212,7 @@ impl App {
             clipboard_subset: None,
             status_seen: (String::new(), std::time::Instant::now()),
             last_overlay: Color32::TRANSPARENT,
+            split: 0.5,
         };
         // Ctrl+=/− zoom the photo, not the whole interface
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -1057,7 +1060,7 @@ impl App {
             self.commit_crop();
         }
         if pressed(Key::Escape) {
-            self.escape();
+            self.escape(ctx);
         }
         if pressed(Key::ArrowRight) {
             self.step_image(1);
@@ -1142,7 +1145,12 @@ impl App {
 
     /// Esc backs out one layer: picker, then the tool's selection or armed
     /// sub-tool, then the tool itself (the crop tool also undoes its changes).
-    fn escape(&mut self) {
+    fn escape(&mut self, ctx: &egui::Context) {
+        if self.fullscreen {
+            self.fullscreen = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            return;
+        }
         if self.profiles.open {
             self.profiles.open = false;
             return;
@@ -1605,8 +1613,9 @@ impl App {
                 ui.painter().rect_filled(f_rect, 4.0, crate::theme::pal().button);
             }
             let f_col = if f_resp.hovered() || self.fullscreen { Color32::WHITE } else { Color32::from_rgb(145, 145, 145) };
-            ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, ic::CORNERS_OUT, egui::FontId::proportional(19.0), f_col);
-            if f_resp.on_hover_text("Full screen (F)").clicked() {
+            let (glyph, tip) = if self.fullscreen { (ic::CORNERS_IN, "Leave full screen (F or Esc)") } else { (ic::CORNERS_OUT, "Full screen (F)") };
+            ui.painter().text(f_rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(19.0), f_col);
+            if f_resp.on_hover_text(tip).clicked() {
                 self.fullscreen = !self.fullscreen;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
@@ -1637,12 +1646,14 @@ impl App {
                 }
             }
         }
-        // always present (blank off the photo) so the panel below never jumps
-        let rgb = match self.drag.hover_rgb {
-            Some(c) => format!("R {:>3}  G {:>3}  B {:>3}", c[0], c[1], c[2]),
-            None => "R      G      B    ".into(),
-        };
-        ui.label(RichText::new(rgb).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)));
+        // always present with a photo (blank off it) so the panel below never jumps
+        if self.doc().is_some() {
+            let rgb = match self.drag.hover_rgb {
+                Some(c) => format!("R {:>3}  G {:>3}  B {:>3}", c[0], c[1], c[2]),
+                None => "R      G      B    ".into(),
+            };
+            ui.label(RichText::new(rgb).monospace().size(10.5).color(Color32::from_rgb(150, 150, 150)));
+        }
         if self.edit.show_scope {
             if let Some(sc) = &self.scope {
                 crate::widgets::vectorscope(ui, sc, crate::worker::SCOPE_SIZE, true);
@@ -1957,7 +1968,8 @@ impl eframe::App for App {
         // Adjustment panel docked to the left of the toolbar strip
         egui::Panel::right("edit_panel")
             .resizable(true)
-            .default_size(325.0)
+            // more room on big screens
+            .default_size((ctx.content_rect().width() * 0.2).clamp(325.0, 440.0))
             .size_range(280.0..=560.0)
             .frame(egui::Frame::new().fill(crate::theme::pal().panel).stroke(Stroke::new(1.0, crate::theme::pal().divider)).inner_margin(egui::Margin {
                 left: 8,

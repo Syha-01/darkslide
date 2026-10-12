@@ -158,8 +158,11 @@ fn export_window(app: &mut App, ctx: &egui::Context) {
         let f = ex.format;
         egui::Grid::new("export").num_columns(2).spacing([12.0, 7.0]).min_col_width(110.0).show(ui, |ui| {
             row(ui, true, "Destination", |ui| {
-                let label = ex.dest.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "Same folder as original".into());
-                ui.add(egui::Label::new(&label).truncate()).on_hover_text(&label);
+                // a typed path works too; empty means next to the original
+                let mut text = ex.dest.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                if ui.add(egui::TextEdit::singleline(&mut text).hint_text("Same folder as original").desired_width(220.0)).changed() {
+                    ex.dest = if text.trim().is_empty() { None } else { Some(PathBuf::from(text.trim())) };
+                }
                 if ui.button(format!("{}  Choose…", ic::FOLDER_OPEN)).clicked() {
                     if let Some(d) = rfd::FileDialog::new().pick_folder() {
                         ex.dest = Some(d);
