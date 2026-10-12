@@ -84,20 +84,24 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             let c_btn = egui::Button::new(RichText::new("Color").size(12.0).color(if c_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
                 .fill(if c_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
                 .stroke(if c_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
-                .corner_radius(3.0);
+                .corner_radius(3.0)
+                .min_size(egui::vec2(60.0, 22.0));
             if ui.add(c_btn).clicked() {
                 s.treatment = Treatment::Color;
             }
             let bw_btn = egui::Button::new(RichText::new("Black & White").size(12.0).color(if bw_sel { Color32::WHITE } else { Color32::from_rgb(165, 165, 165) }))
                 .fill(if bw_sel { Color32::from_rgb(52, 52, 52) } else { Color32::from_rgb(32, 32, 32) })
                 .stroke(if bw_sel { Stroke::new(1.0, Color32::from_rgb(72, 72, 72)) } else { Stroke::new(1.0, Color32::from_rgb(44, 44, 44)) })
-                .corner_radius(3.0);
+                .corner_radius(3.0)
+                .min_size(egui::vec2(100.0, 22.0));
             if ui.add(bw_btn).clicked() {
                 s.treatment = Treatment::BlackAndWhite;
             }
         });
+        ui.add_space(4.0);
         let shown = s.profile.strip_prefix("dcp:").map(|p| dcp_name(p)).unwrap_or_else(|| s.profile.clone());
-        egui::ComboBox::from_id_salt("profile").width((ui.available_width() - 16.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
+        let full_w = ui.available_width();
+        egui::ComboBox::from_id_salt("profile").width((full_w - 12.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
             let mut group = "";
             for p in PROFILES {
                 if p.group != group {
@@ -177,9 +181,10 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
     // ------------------------------------------------------------- Basic
     let mut basic_on = s.panels.basic;
     section(ui, "Basic", Some(&mut basic_on), true, |ui| {
+        widgets::sub_header(ui, "WHITE BALANCE");
         ui.horizontal(|ui| {
-            ui.label("White balance");
-            egui::ComboBox::from_id_salt("wb").selected_text(s.wb_mode.label()).show_ui(ui, |ui| {
+            let full_w = ui.available_width();
+            egui::ComboBox::from_id_salt("wb").selected_text(s.wb_mode.label()).width((full_w - 36.0).max(60.0)).show_ui(ui, |ui| {
                 let modes: &[WbMode] = if is_raw { &WbMode::ALL } else { &[WbMode::AsShot, WbMode::Auto, WbMode::Custom] };
                 for m in modes {
                     if ui.selectable_label(s.wb_mode == *m, m.label()).clicked() {
@@ -204,9 +209,9 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         let gti = widgets::grad_tint();
         let (def_t, def_ti) = engine.resolved_temp_tint(&DevelopSettings { wb_mode: WbMode::AsShot, ..s.clone() });
         let tchg = if is_raw {
-            slider(ui, &mut t, SliderSpec::new("Temperature", 1500.0, 50000.0, def_t).grad(&gt).log())
+            slider(ui, &mut t, SliderSpec::new("Temp", 1500.0, 50000.0, def_t).grad(&gt).log())
         } else {
-            slider(ui, &mut t, SliderSpec::new("Temperature", -100.0, 100.0, 0.0).grad(&gt))
+            slider(ui, &mut t, SliderSpec::new("Temp", -100.0, 100.0, 0.0).grad(&gt))
         };
         let tichg = slider(ui, &mut ti, SliderSpec::new("Tint", -150.0, 150.0, def_ti).grad(&gti));
         if tchg || tichg {
@@ -214,32 +219,19 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
             s.temperature = t;
             s.tint = ti;
         }
-        ui.horizontal(|ui| {
-            let auto_btn = egui::Button::new(RichText::new("Auto").size(12.0).color(Color32::from_rgb(220, 220, 220)))
-                .fill(Color32::from_rgb(46, 46, 46))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(60, 60, 60)))
-                .corner_radius(3.0);
-            if ui.add(auto_btn).on_hover_text("Auto tone (Ctrl+U)").clicked() {
-                pc.actions.push(Action::AutoTone);
-            }
-            let def_btn = egui::Button::new(RichText::new("Default").size(12.0).color(Color32::from_rgb(220, 220, 220)))
-                .fill(Color32::from_rgb(46, 46, 46))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(60, 60, 60)))
-                .corner_radius(3.0);
-            if ui.add(def_btn).on_hover_text("Reset the Basic sliders").clicked() {
+
+        widgets::sub_header_tone(
+            ui,
+            || pc.actions.push(Action::AutoTone),
+            || {
                 s.exposure = 0.0;
                 s.contrast = 0.0;
                 s.highlights = 0.0;
                 s.shadows = 0.0;
                 s.whites = 0.0;
                 s.blacks = 0.0;
-                s.texture = 0.0;
-                s.clarity = 0.0;
-                s.dehaze = 0.0;
-                s.vibrance = 0.0;
-                s.saturation = 0.0;
-            }
-        });
+            },
+        );
         let max_ev = if s.hdr.enabled { 10.0 } else { 5.0 };
         slider(ui, &mut s.exposure, SliderSpec::new("Exposure", -max_ev, max_ev, 0.0).dec(2));
         slider(ui, &mut s.contrast, SliderSpec::new("Contrast", -100.0, 100.0, 0.0));
@@ -247,11 +239,11 @@ pub fn edit_panel(ui: &mut egui::Ui, doc: &mut Doc, st: &mut EditUi, pc: &mut Pa
         slider(ui, &mut s.shadows, SliderSpec::new("Shadows", -100.0, 100.0, 0.0));
         slider(ui, &mut s.whites, SliderSpec::new("Whites", -100.0, 100.0, 0.0));
         slider(ui, &mut s.blacks, SliderSpec::new("Blacks", -100.0, 100.0, 0.0));
-        ui.add_space(4.0);
+
+        widgets::sub_header(ui, "PRESENCE");
         slider(ui, &mut s.texture, SliderSpec::new("Texture", -100.0, 100.0, 0.0));
         slider(ui, &mut s.clarity, SliderSpec::new("Clarity", -100.0, 100.0, 0.0));
         slider(ui, &mut s.dehaze, SliderSpec::new("Dehaze", -100.0, 100.0, 0.0));
-        ui.add_space(4.0);
         slider(ui, &mut s.vibrance, SliderSpec::new("Vibrance", -100.0, 100.0, 0.0));
         slider(ui, &mut s.saturation, SliderSpec::new("Saturation", -100.0, 100.0, 0.0));
         ui.add_space(4.0);

@@ -1,7 +1,7 @@
 //! ACR-style widgets: labelled gradient sliders, curve editor, colour wheel,
 //! histogram, vectorscope.
 
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 use darkslide_core::analysis::Histogram;
 use darkslide_core::params::CurvePoints;
@@ -311,59 +311,46 @@ pub fn take_alt_preview(ctx: &egui::Context) -> Option<AltPreview> {
 }
 
 /// Label + value on one line, slider track below. Returns true if changed.
+/// Single-line Camera Raw slider: [Label] [===== Track =====] [Value]
 pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
     let mut changed = false;
-    let width = ui.available_width();
-    ui.horizontal(|ui| {
-        ui.set_width(width);
-        let lab = ui.add(egui::Label::new(egui::RichText::new(spec.label).size(12.5).color(TEXT_PRIMARY)).sense(Sense::click()));
-        if lab.double_clicked() && ui.input(|i| i.modifiers.shift) {
-            // shift + double-click: auto for this slider only (ACR)
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
-        } else if lab.double_clicked() && *value != spec.default {
-            *value = spec.default;
-            changed = true;
-        }
-        lab.on_hover_text("Double-click to reset, Shift+double-click for Auto");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut v = *value;
-            let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
-            let dv = egui::DragValue::new(&mut v).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
-                let s = format!("{:.*}", spec.decimals, n);
-                let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
-                format!("{s}{}", spec.suffix)
-            });
-            let r = ui.scope(|ui| {
-                ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(20, 20, 20);
-                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(44, 44, 44));
-                ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(28, 28, 28);
-                ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
-                ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(16, 16, 16);
-                ui.visuals_mut().widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-                ui.add_sized([48.0, 18.0], dv)
-            }).inner;
-            if r.dragged() {
-                mark_interacting(ui);
-            }
-            if r.changed() && v != *value {
-                *value = round_to(v, spec.decimals);
-                changed = true;
-            }
-        });
-    });
-    // track
-    let h = 13.0;
-    let (rect, resp) = ui.allocate_exact_size(vec2(width, h), Sense::click_and_drag());
-    let track = Rect::from_center_size(rect.center(), vec2(rect.width() - 8.0, 3.0));
-    let painter = ui.painter_at(rect.expand(2.0));
+    let total_w = ui.available_width();
+    let row_h = 21.0;
+    let (row_rect, _) = ui.allocate_exact_size(vec2(total_w, row_h), Sense::hover());
+    
+    let label_w = 82.0;
+    let val_w = 44.0;
+    let gap = 6.0;
+    let track_w = (total_w - label_w - val_w - gap * 2.0).max(40.0);
+
+    let label_rect = Rect::from_min_size(row_rect.left_top(), vec2(label_w, row_h));
+    let track_rect = Rect::from_min_size(pos2(label_rect.right() + gap, row_rect.top()), vec2(track_w, row_h));
+    let val_rect = Rect::from_min_size(pos2(track_rect.right() + gap, row_rect.top() + 1.0), vec2(val_w, row_h - 2.0));
+
+    // 1. Label
+    let lab = egui::Label::new(egui::RichText::new(spec.label).size(12.0).color(TEXT_PRIMARY)).sense(Sense::click());
+    let lab_resp = ui.put(label_rect, lab);
+    if lab_resp.double_clicked() && ui.input(|i| i.modifiers.shift) {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_auto_slider"), spec.label.to_string()));
+    } else if lab_resp.double_clicked() && *value != spec.default {
+        *value = spec.default;
+        changed = true;
+    }
+    lab_resp.on_hover_text("Double-click to reset, Shift+double-click for Auto");
+
+    // 2. Track & Handle
+    let track_line = Rect::from_center_size(track_rect.center(), vec2(track_rect.width(), 3.0));
+    let painter = ui.painter_at(track_rect.expand(2.0));
+    let track_resp = ui.interact(track_rect, ui.make_persistent_id(("slider_trk", spec.label)), Sense::click_and_drag());
+
     match spec.gradient {
         Some(stops) if stops.len() >= 2 => {
             let mut mesh = egui::Mesh::default();
             let n = stops.len();
             for (i, c) in stops.iter().enumerate() {
-                let x = track.left() + track.width() * i as f32 / (n - 1) as f32;
-                mesh.colored_vertex(pos2(x, track.top() - 1.0), *c);
-                mesh.colored_vertex(pos2(x, track.bottom() + 1.0), *c);
+                let x = track_line.left() + track_line.width() * i as f32 / (n - 1) as f32;
+                mesh.colored_vertex(pos2(x, track_line.top()), *c);
+                mesh.colored_vertex(pos2(x, track_line.bottom()), *c);
                 if i > 0 {
                     let b = (i * 2) as u32;
                     mesh.add_triangle(b - 2, b - 1, b);
@@ -373,37 +360,38 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             painter.add(egui::Shape::mesh(mesh));
         }
         _ => {
-            painter.rect_filled(track, 1.5, Color32::from_rgb(26, 26, 26));
+            painter.rect_filled(track_line, 1.5, Color32::from_rgb(22, 22, 22));
             let t0 = to_t(&spec, spec.default);
             let t1 = to_t(&spec, *value);
-            let x0 = track.left() + track.width() * t0.min(t1);
-            let x1 = track.left() + track.width() * t0.max(t1);
-            painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, track.y_range()), 1.5, ACCENT.gamma_multiply(0.85));
+            let x0 = track_line.left() + track_line.width() * t0.min(t1);
+            let x1 = track_line.left() + track_line.width() * t0.max(t1);
+            painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, track_line.y_range()), 1.5, ACCENT.gamma_multiply(0.9));
             if spec.min < spec.default && spec.max > spec.default {
-                let cx = track.left() + track.width() * t0;
-                painter.line_segment([pos2(cx, track.top() - 1.5), pos2(cx, track.bottom() + 1.5)], Stroke::new(1.0, Color32::from_rgb(100, 100, 100)));
+                let cx = track_line.left() + track_line.width() * t0;
+                painter.line_segment([pos2(cx, track_line.top() - 2.0), pos2(cx, track_line.bottom() + 2.0)], Stroke::new(1.0, Color32::from_rgb(70, 70, 70)));
             }
         }
     }
+
     let t = to_t(&spec, *value);
-    let hx = track.left() + track.width() * t;
-    let handle_col = if resp.hovered() || resp.dragged() { Color32::WHITE } else { Color32::from_rgb(238, 238, 238) };
-    painter.circle_filled(pos2(hx, rect.center().y), 5.5, handle_col);
-    painter.circle_stroke(pos2(hx, rect.center().y), 5.5, Stroke::new(1.0, Color32::from_rgb(32, 32, 32)));
-    painter.circle_stroke(pos2(hx, rect.center().y), 6.5, Stroke::new(1.0, Color32::from_black_alpha(70)));
-    if resp.double_clicked() {
+    let hx = track_line.left() + track_line.width() * t;
+    let handle_col = if track_resp.hovered() || track_resp.dragged() { Color32::WHITE } else { Color32::from_rgb(230, 230, 230) };
+    painter.circle_filled(pos2(hx, track_rect.center().y), 4.5, handle_col);
+    painter.circle_stroke(pos2(hx, track_rect.center().y), 4.5, Stroke::new(1.0, Color32::from_rgb(24, 24, 24)));
+
+    if track_resp.double_clicked() {
         if *value != spec.default {
             *value = spec.default;
             changed = true;
         }
-    } else if resp.dragged() || resp.clicked() {
-        if let Some(p) = resp.interact_pointer_pos() {
+    } else if track_resp.dragged() || track_resp.clicked() {
+        if let Some(p) = track_resp.interact_pointer_pos() {
             let fine = ui.input(|i| i.modifiers.shift);
-            let nt = if fine && resp.dragged() {
-                let d = resp.drag_delta().x / track.width() * 0.1;
+            let nt = if fine && track_resp.dragged() {
+                let d = track_resp.drag_delta().x / track_line.width() * 0.1;
                 to_t(&spec, *value) + d
             } else {
-                (p.x - track.left()) / track.width()
+                (p.x - track_line.left()) / track_line.width()
             };
             let mut nv = round_to(from_t(&spec, nt), spec.decimals);
             if spec.log {
@@ -414,7 +402,7 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
                 changed = true;
             }
         }
-        if resp.dragged() {
+        if track_resp.dragged() {
             mark_interacting(ui);
             if ui.input(|i| i.modifiers.alt) {
                 if let Some(k) = alt_kind(spec.label) {
@@ -423,6 +411,34 @@ pub fn slider(ui: &mut egui::Ui, value: &mut f32, spec: SliderSpec) -> bool {
             }
         }
     }
+
+    // 3. Value Box
+    let mut v = *value;
+    let speed = if spec.log { (v * 0.002).max(1.0) } else { (spec.max - spec.min) / 400.0 };
+    let dv = egui::DragValue::new(&mut v).range(spec.min..=spec.max).speed(speed).fixed_decimals(spec.decimals).custom_formatter(|n, _| {
+        let s = format!("{:.*}", spec.decimals, n);
+        let s = if spec.min < 0.0 && n > 0.0 { format!("+{s}") } else { s };
+        format!("{s}{}", spec.suffix)
+    });
+
+    let r = ui.scope(|ui| {
+        ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(18, 18, 18);
+        ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(42, 42, 42));
+        ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(26, 26, 26);
+        ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
+        ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(14, 14, 14);
+        ui.visuals_mut().widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+        ui.put(val_rect, dv)
+    }).inner;
+
+    if r.dragged() {
+        mark_interacting(ui);
+    }
+    if r.changed() && v != *value {
+        *value = round_to(v, spec.decimals);
+        changed = true;
+    }
+
     ui.add_space(2.0);
     changed
 }
@@ -457,34 +473,128 @@ pub fn grad_band_lum(center: f32) -> Vec<Color32> {
     vec![hue_color(center, 0.8, 0.15), hue_color(center, 0.6, 0.95)]
 }
 
+pub fn sub_header(ui: &mut egui::Ui, title: &str) {
+    ui.add_space(8.0);
+    let total_w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(total_w, 15.0), Sense::hover());
+    let painter = ui.painter_at(rect);
+    let galley = painter.layout_no_wrap(
+        title.to_string(),
+        egui::FontId::proportional(10.5),
+        Color32::from_rgb(140, 140, 140),
+    );
+    let text_w = galley.size().x;
+    painter.galley(rect.left_top(), galley, Color32::from_rgb(140, 140, 140));
+    if text_w + 12.0 < rect.width() {
+        painter.line_segment(
+            [pos2(rect.left() + text_w + 8.0, rect.center().y), pos2(rect.right(), rect.center().y)],
+            Stroke::new(1.0, Color32::from_rgb(42, 42, 42)),
+        );
+    }
+    ui.add_space(3.0);
+}
+
+pub fn sub_header_tone(ui: &mut egui::Ui, on_auto: impl FnOnce(), on_default: impl FnOnce()) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("TONE").size(10.5).color(Color32::from_rgb(140, 140, 140)));
+        let sep_x = ui.cursor().left() + 4.0;
+        let sep_y = ui.cursor().center().y;
+        let right_limit = ui.max_rect().right() - 110.0;
+        if sep_x < right_limit {
+            ui.painter().line_segment([pos2(sep_x, sep_y), pos2(right_limit, sep_y)], Stroke::new(1.0, Color32::from_rgb(42, 42, 42)));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let def_btn = egui::Button::new(RichText::new("Default").size(11.0).color(Color32::from_rgb(205, 205, 205)))
+                .fill(Color32::from_rgb(38, 38, 38))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(52, 52, 52)))
+                .corner_radius(2.0);
+            if ui.add(def_btn).on_hover_text("Reset Tone sliders").clicked() {
+                on_default();
+            }
+            let auto_btn = egui::Button::new(RichText::new("Auto").size(11.0).color(Color32::from_rgb(205, 205, 205)))
+                .fill(Color32::from_rgb(38, 38, 38))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(52, 52, 52)))
+                .corner_radius(2.0);
+            if ui.add(auto_btn).on_hover_text("Auto tone (Ctrl+U)").clicked() {
+                on_auto();
+            }
+        });
+    });
+    ui.add_space(3.0);
+}
+
 /// Collapsible section with an enable toggle (ACR's eye icon).
 pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, default_open: bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
     let id = ui.make_persistent_id(("section", title));
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
     let mut toggled = false;
-    let header = ui.horizontal(|ui| {
-        let open = state.is_open();
-        let arrow = if open { "⏷" } else { "⏵" };
-        let r = ui.add(egui::Label::new(egui::RichText::new(format!("{arrow} {title}")).strong().size(13.5)).sense(Sense::click()));
-        if r.clicked() {
-            state.toggle(ui);
+    let open = state.is_open();
+
+    let full_w = ui.available_width();
+    let header_h = 28.0;
+    let (header_rect, header_resp) = ui.allocate_exact_size(vec2(full_w, header_h), Sense::click());
+    let painter = ui.painter_at(header_rect);
+
+    if header_resp.hovered() {
+        painter.rect_filled(header_rect, 2.0, Color32::from_rgb(40, 40, 40));
+    } else {
+        painter.rect_filled(header_rect, 0.0, Color32::from_rgb(32, 32, 32));
+    }
+    painter.line_segment(
+        [pos2(header_rect.left(), header_rect.bottom()), pos2(header_rect.right(), header_rect.bottom())],
+        Stroke::new(1.0, Color32::from_rgb(42, 42, 42)),
+    );
+
+    let arrow = if open { "▾" } else { "▸" };
+    painter.text(
+        pos2(header_rect.left() + 6.0, header_rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        arrow,
+        egui::FontId::proportional(12.0),
+        Color32::from_rgb(160, 160, 160),
+    );
+
+    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(12.5), Color32::from_rgb(225, 225, 225));
+    let text_w = galley.size().x;
+    let label_rect = Rect::from_min_size(pos2(header_rect.left() + 20.0, header_rect.top()), vec2(text_w + 8.0, header_h));
+    let lab = egui::Label::new(RichText::new(title).size(12.5).strong().color(Color32::from_rgb(225, 225, 225)));
+    ui.put(label_rect, lab);
+
+    let mut eye_clicked = false;
+    if let Some(en) = enabled {
+        let eye_rect = Rect::from_center_size(pos2(header_rect.right() - 15.0, header_rect.center().y), vec2(20.0, 20.0));
+        let eye_resp = ui.interact(eye_rect, id.with("eye"), Sense::click());
+        if eye_resp.hovered() {
+            painter.rect_filled(eye_rect, 2.0, Color32::from_rgb(52, 52, 52));
         }
-        if let Some(en) = enabled {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let icon = if *en { "👁" } else { "⊘" };
-                if ui.add(egui::Button::new(icon).frame(false)).on_hover_text("Toggle panel").clicked() {
-                    *en = !*en;
-                    toggled = true;
-                }
-            });
+        let eye_col = if *en {
+            if eye_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(210, 210, 210) }
+        } else {
+            Color32::from_rgb(90, 90, 90)
+        };
+        draw_eyeball(&painter, eye_rect.center(), 14.0, *en, eye_col);
+        if eye_resp.on_hover_text("Toggle section on/off").clicked() {
+            *en = !*en;
+            toggled = true;
+            eye_clicked = true;
         }
-    });
-    let _ = header;
+    }
+
+    if header_resp.clicked() && !eye_clicked {
+        state.toggle(ui);
+    }
+
     let r = state.show_body_unindented(ui, |ui| {
-        ui.add_space(2.0);
-        body(ui)
+        ui.add_space(4.0);
+        let out = egui::Frame::new()
+            .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 6 })
+            .show(ui, |ui| body(ui))
+            .inner;
+        ui.add_space(4.0);
+        out
     });
-    ui.separator();
+
     if toggled {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ds_panel_toggled"), true));
     }
