@@ -426,46 +426,67 @@ pub fn snapshots_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi) {
 pub fn masking_panel(ui: &mut egui::Ui, doc: &mut Doc, t: &mut ToolUi, eu: &mut EditUi, pick: &mut Pick) {
     let s = &mut doc.settings;
     ui.heading("Masking");
-    ui.label(RichText::new("Create new mask").strong());
+    ui.label(RichText::new("Create new mask").size(13.5).strong());
     let mut create: Option<MaskShape> = None;
     let mut ai: Option<AiMaskKind> = None;
-    ui.horizontal_wrapped(|ui| {
-        if ui.button(format!("{}  Subject", ic::USER)).clicked() {
+    // equal two-column tiles, grouped like ACR's create menu
+    let tw = ((ui.available_width() - 6.0) / 2.0).floor();
+    let tile = |icon: &str, label: &str| egui::Button::new(format!("{icon}  {label}")).min_size(egui::vec2(tw, 28.0));
+    let caption = |ui: &mut egui::Ui, t: &str| {
+        ui.add_space(4.0);
+        ui.label(RichText::new(t).size(11.0).color(crate::theme::pal().text_muted));
+    };
+    caption(ui, "SELECT");
+    egui::Grid::new("mask_ai").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
+        if ui.add(tile(ic::USER, "Subject")).clicked() {
             ai = Some(AiMaskKind::Subject);
         }
-        if ui.button(format!("{}  Sky", ic::CLOUD)).clicked() {
+        if ui.add(tile(ic::CLOUD, "Sky")).clicked() {
             ai = Some(AiMaskKind::Sky);
         }
-        if ui.button(format!("{}  Background", ic::IMAGE)).clicked() {
+        ui.end_row();
+        if ui.add(tile(ic::IMAGE, "Background")).clicked() {
             ai = Some(AiMaskKind::Background);
         }
-        if ui.button(format!("{}  Objects", ic::BOUNDING_BOX)).on_hover_text("Drag a box around the object").clicked() {
+        if ui.add(tile(ic::BOUNDING_BOX, "Objects")).on_hover_text("Drag a box around the object").clicked() {
             t.mask_tool = MaskTool::ObjectBox;
         }
-        if ui.button(format!("{}  Brush", ic::PAINT_BRUSH)).clicked() {
+        ui.end_row();
+    });
+    caption(ui, "SHAPES");
+    egui::Grid::new("mask_shapes").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
+        if ui.add(tile(ic::PAINT_BRUSH, "Brush")).clicked() {
             create = Some(MaskShape::Brush { strokes: vec![] });
             t.mask_tool = MaskTool::Brush;
         }
-        if ui.button(format!("{}  Linear", ic::GRADIENT)).clicked() {
+        if ui.add(tile(ic::GRADIENT, "Linear")).clicked() {
             t.mask_tool = MaskTool::Linear;
             t.selected_mask = None;
         }
-        if ui.button(format!("{}  Radial", ic::CIRCLE)).clicked() {
+        ui.end_row();
+        if ui.add(tile(ic::CIRCLE, "Radial")).clicked() {
             t.mask_tool = MaskTool::Radial;
             t.selected_mask = None;
         }
-        if ui.button(format!("{}  Color range", ic::PALETTE)).clicked() {
+        ui.end_row();
+    });
+    caption(ui, "RANGE");
+    egui::Grid::new("mask_ranges").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
+        if ui.add(tile(ic::PALETTE, "Color range")).clicked() {
             create = Some(MaskShape::ColorRange { samples: vec![], refine: 50.0 });
             *pick = Pick::Sampler;
         }
-        if ui.button(format!("{}  Luminance range", ic::SUN)).clicked() {
+        if ui.add(tile(ic::SUN, "Luminance range")).clicked() {
             create = Some(MaskShape::LuminanceRange { range: [0.6, 1.0], smoothness: 30.0 });
         }
-        if ui.button(format!("{}  Depth range", ic::MOUNTAINS)).clicked() {
+        ui.end_row();
+        if ui.add(tile(ic::MOUNTAINS, "Depth range")).clicked() {
             create = Some(MaskShape::DepthRange { range: [0.0, 0.3], smoothness: 30.0 });
         }
+        ui.end_row();
     });
-    ui.menu_button("Landscape ▸", |ui| {
+    ui.add_space(4.0);
+    ui.menu_button(format!("{}  Landscape  {}", ic::TREE, ic::CARET_RIGHT), |ui| {
         for k in [
             AiMaskKind::Water,
             AiMaskKind::Vegetation,

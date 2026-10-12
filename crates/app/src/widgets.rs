@@ -358,7 +358,7 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
     let open = state.is_open();
 
     let full_w = ui.available_width();
-    let header_h = 28.0;
+    let header_h = 32.0;
     let (header_rect, header_resp) = ui.allocate_exact_size(vec2(full_w, header_h), Sense::click());
     header_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, title));
     let painter = ui.painter_at(header_rect);
@@ -383,8 +383,8 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, enabled: Option<&mut bool>, de
     );
 
     // painted, not a Label: a selectable label would swallow the header click
-    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(13.0), Color32::from_rgb(225, 225, 225));
-    painter.galley(pos2(header_rect.left() + 20.0, header_rect.center().y - galley.size().y / 2.0), galley, Color32::from_rgb(225, 225, 225));
+    let galley = painter.layout_no_wrap(title.to_string(), egui::FontId::proportional(14.0), Color32::from_rgb(235, 235, 235));
+    painter.galley(pos2(header_rect.left() + 22.0, header_rect.center().y - galley.size().y / 2.0), galley, Color32::from_rgb(225, 225, 225));
 
     let mut eye_clicked = false;
     if let Some(en) = enabled {
